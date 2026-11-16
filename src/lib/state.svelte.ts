@@ -615,23 +615,36 @@ class AppState {
     );
   }
 
+  /**
+   * Highlight `anchor`. `replaces`: highlights it overlaps, which merge into
+   * it (their notes are kept), so text is never highlighted twice. Covering
+   * exactly one existing highlight just recolours it.
+   */
   addHighlight(
     anchor: TextAnchor & { text?: string },
     color: HighlightColor = this.highlightColor,
+    replaces: string[] = [],
   ): string | null {
     const path = this.currentPath;
     if (!path || this.isMermaidDoc || !anchor.quote.trim()) return null;
+    const list = this.highlightStore[path] ?? [];
+    const merged = list.filter((x) => replaces.includes(x.id));
+    if (merged.length === 1 && merged[0].quote === anchor.quote) {
+      this.updateHighlight(merged[0].id, { color });
+      return merged[0].id;
+    }
+    const notes = [...new Set(merged.map((x) => x.note.trim()).filter(Boolean))];
     const h: Highlight = {
       id: newId("hl"),
       quote: anchor.quote,
       prefix: anchor.prefix,
       suffix: anchor.suffix,
       color,
-      note: "",
+      note: notes.join("\n\n"),
       createdAt: new Date().toISOString(),
     };
     if (anchor.text && anchor.text !== anchor.quote) h.text = anchor.text;
-    this.highlightStore[path] = [...(this.highlightStore[path] ?? []), h];
+    this.highlightStore[path] = [...list.filter((x) => !replaces.includes(x.id)), h];
     this.highlightColor = color;
     localStorage.setItem("inky.highlightColor", color);
     this.#saveHighlights();
@@ -653,25 +666,33 @@ class AppState {
   }
 
   removeHighlight(id: string) {
+    this.removeHighlights([id]);
+  }
+
+  /** Remove highlights (from any documents), with one Undo for all of them. */
+  removeHighlights(ids: string[]) {
+    const removed: [string, Highlight][] = [];
     for (const [path, list] of Object.entries(this.highlightStore)) {
-      const i = list.findIndex((x) => x.id === id);
-      if (i < 0) continue;
-      const removed = $state.snapshot(list[i]) as Highlight;
-      const rest = list.filter((x) => x.id !== id);
+      const gone = list.filter((x) => ids.includes(x.id));
+      if (!gone.length) continue;
+      for (const h of gone) removed.push([path, $state.snapshot(h) as Highlight]);
+      const rest = list.filter((x) => !ids.includes(x.id));
       if (rest.length) this.highlightStore[path] = rest;
       else delete this.highlightStore[path];
-      this.#saveHighlights();
-      toast.success("Highlight removed", {
-        action: {
-          label: "Undo",
-          onClick: () => {
-            this.highlightStore[path] = [...(this.highlightStore[path] ?? []), removed];
-            this.#saveHighlights();
-          },
-        },
-      });
-      return;
     }
+    if (!removed.length) return;
+    this.#saveHighlights();
+    toast.success(removed.length === 1 ? "Highlight removed" : `${removed.length} highlights removed`, {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          for (const [path, h] of removed) {
+            this.highlightStore[path] = [...(this.highlightStore[path] ?? []), h];
+          }
+          this.#saveHighlights();
+        },
+      },
+    });
   }
 
   /** Show a highlight: open its document if needed, then scroll to it. */

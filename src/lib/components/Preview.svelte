@@ -11,9 +11,19 @@
     type SourceBlock,
   } from "$lib/markdown";
   import { registerScroller } from "$lib/scrollsync";
-  import { wrapQuote, wrapAnchor, unwrapMarks, contextAround } from "$lib/comments";
+  import {
+    wrapQuote,
+    wrapAnchor,
+    unwrapMarks,
+    contextAround,
+    flatText,
+    textOffset,
+    rangeFromOffsets,
+    CONTEXT_CHARS,
+  } from "$lib/comments";
   import { COLOR_KEYS, HIGHLIGHT_COLORS, readableText, type HighlightColor } from "$lib/highlights";
   import HighlightPopover from "./HighlightPopover.svelte";
+  import Eraser from "@lucide/svelte/icons/eraser";
   import { htmlToMarkdown } from "$lib/richedit";
   import { invoke } from "@tauri-apps/api/core";
   import { EditorView as CmEditorView, keymap as cmKeymap, drawSelection } from "@codemirror/view";
@@ -111,6 +121,7 @@
         const mark = document.createElement("mark");
         mark.className = `hl hl-${h.color}`;
         mark.dataset.hlId = h.id;
+        mark.title = "Click to change colour, add a note or remove";
         if (last && h.note) mark.dataset.note = "";
         last = false;
         return mark;
@@ -161,7 +172,7 @@
     const srect = scroller.getBoundingClientRect();
     hlPop = {
       id: mark.dataset.hlId,
-      x: Math.max(8, Math.min(rect.left - srect.left, srect.width - 264)),
+      x: Math.max(8, Math.min(rect.left - srect.left, srect.width - 296)),
       y: rect.bottom - srect.top + scroller.scrollTop + 6,
     };
   }
@@ -169,15 +180,39 @@
   /** Highlight the selected text (from the selection pill or the H key). */
   function highlightSelection(color: HighlightColor) {
     if (!selAction) return;
-    const draft = { ...selAction.draft, text: selAction.text };
+    let anchor: CommentDraft & { text?: string } = { ...selAction.draft, text: selAction.text };
+    const overlaps = selOverlaps;
+    // Touching existing highlights: merge them all into one span, so text is
+    // never highlighted twice.
+    if (overlaps.length && container) {
+      const starts = overlaps.map((h) => app.highlightOrder[h.id]);
+      const from = Math.min(selAction.start, ...starts);
+      const to = Math.max(selAction.end, ...overlaps.map((h, i) => starts[i] + h.quote.length));
+      const full = flatText(container);
+      const range = rangeFromOffsets(container, from, to);
+      anchor = {
+        quote: full.slice(from, to),
+        prefix: full.slice(Math.max(0, from - CONTEXT_CHARS), from),
+        suffix: full.slice(to, to + CONTEXT_CHARS),
+        text: range ? readableText(range) : undefined,
+      };
+    }
     selAction = null;
     // Capture first: committing an edit session replaces the DOM.
     if (blockEditing) {
       if (richWrapper) finishRichEdit(true);
       else rawFinish?.(true);
     }
-    app.addHighlight(draft, color);
+    app.addHighlight(anchor, color, overlaps.map((h) => h.id));
     window.getSelection()?.removeAllRanges();
+  }
+
+  /** Remove the highlights the selection touches (selection pill). */
+  function unhighlightSelection() {
+    const ids = selOverlaps.map((h) => h.id);
+    selAction = null;
+    window.getSelection()?.removeAllRanges();
+    app.removeHighlights(ids);
   }
 
   // Mermaid needs a second pass over the real DOM, and a full redo on theme change.
@@ -359,9 +394,25 @@
   });
 
   // --- select-to-comment ---------------------------------------------------
-  let selAction = $state<{ x: number; y: number; draft: CommentDraft; text: string } | null>(
-    null,
-  );
+  let selAction = $state<{
+    x: number;
+    y: number;
+    draft: CommentDraft;
+    text: string;
+    /** The selection's span in the page text (see $lib/comments flatText). */
+    start: number;
+    end: number;
+  } | null>(null);
+
+  /** Highlights the current selection touches. */
+  const selOverlaps = $derived.by(() => {
+    const sel = selAction;
+    if (!sel) return [];
+    return app.docHighlights.filter((h) => {
+      const at = app.highlightOrder[h.id];
+      return at !== undefined && at < sel.end && at + h.quote.length > sel.start;
+    });
+  });
 
   function onMouseUp(e: MouseEvent) {
     if (e.target instanceof HTMLTextAreaElement) return;
@@ -400,10 +451,12 @@
       const rect = range.getBoundingClientRect();
       const srect = scroller.getBoundingClientRect();
       selAction = {
-        x: Math.max(8, Math.min(rect.right - srect.left - 120, srect.width - 290)),
+        x: Math.max(8, Math.min(rect.right - srect.left - 120, srect.width - 380)),
         y: Math.max(4, rect.top - srect.top + scroller.scrollTop - 38),
         draft: { quote, ...contextAround(container, range) },
         text: readableText(range),
+        start: textOffset(container, range.startContainer, range.startOffset),
+        end: textOffset(container, range.endContainer, range.endOffset),
       };
     }, 0);
   }
@@ -1426,6 +1479,15 @@
           onclick={() => highlightSelection(key)}
         ></button>
       {/each}
+      {#if selOverlaps.length}
+        <button
+          class="ml-0.5 flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium transition-colors hover:bg-accent"
+          title={selOverlaps.length === 1 ? "Remove this highlight" : `Remove ${selOverlaps.length} highlights`}
+          onclick={unhighlightSelection}
+        >
+          <Eraser class="size-3.5" /> Remove
+        </button>
+      {/if}
       {#if app.docSidecars}
         <div class="mx-0.5 h-4 w-px bg-border"></div>
         <button

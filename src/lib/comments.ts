@@ -80,6 +80,45 @@ function buildTextIndex(container: HTMLElement): { nodes: TextIndexEntry[]; full
   return { nodes, full };
 }
 
+/** The container's text as anchors see it (diagram text excluded). */
+export function flatText(container: HTMLElement): string {
+  return buildTextIndex(container).full;
+}
+
+/** Offset of a DOM boundary point within `flatText(container)`. */
+export function textOffset(container: HTMLElement, node: Node, offset: number): number {
+  const { nodes } = buildTextIndex(container);
+  const point = document.createRange();
+  point.setStart(node, offset);
+  let acc = 0;
+  for (const { node: t } of nodes) {
+    if (t === node) return acc + offset;
+    // Text that starts after the point: the point sits before it.
+    if (point.comparePoint(t, 0) > 0) return acc;
+    acc += t.nodeValue?.length ?? 0;
+  }
+  return acc;
+}
+
+/** A DOM range covering `flatText(container).slice(start, end)`. */
+export function rangeFromOffsets(container: HTMLElement, start: number, end: number): Range | null {
+  const { nodes } = buildTextIndex(container);
+  const range = document.createRange();
+  let startSet = false;
+  for (const { node, start: s } of nodes) {
+    const len = node.nodeValue?.length ?? 0;
+    if (!startSet && start <= s + len) {
+      range.setStart(node, Math.max(0, start - s));
+      startSet = true;
+    }
+    if (startSet && end <= s + len) {
+      range.setEnd(node, Math.max(0, end - s));
+      return range;
+    }
+  }
+  return null;
+}
+
 /** Context (prefix/suffix) around a DOM selection range within `container`. */
 export function contextAround(
   container: HTMLElement,

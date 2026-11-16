@@ -72,3 +72,19 @@ describe("readable text", () => {
     expect(shownText(hl("y", { quote: "plain  text" }))).toBe("plain text");
   });
 });
+
+describe("text offsets", () => {
+  it("maps DOM boundaries to page-text offsets and back, across marks", async () => {
+    const { flatText, textOffset, rangeFromOffsets } = await import("$lib/comments");
+    const box = document.createElement("div");
+    box.innerHTML = '<p>Alpha <mark class="hl">beta gamma</mark> delta</p><p>Epsilon</p>';
+    document.body.replaceChildren(box);
+    const full = flatText(box);
+    expect(full).toBe("Alpha beta gamma deltaEpsilon");
+    const mark = box.querySelector("mark")!;
+    expect(textOffset(box, mark.firstChild!, 5)).toBe(full.indexOf("gamma"));
+    expect(textOffset(box, box.querySelectorAll("p")[1], 0)).toBe(full.indexOf("Epsilon"));
+    const r = rangeFromOffsets(box, full.indexOf("gamma"), full.indexOf("Epsilon") + 3)!;
+    expect(r.toString()).toBe("gamma deltaEps");
+  });
+});

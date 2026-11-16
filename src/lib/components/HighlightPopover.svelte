@@ -26,14 +26,35 @@
     tick().then(() => box?.focus());
   }
 
+  function remove() {
+    // Read the id first: closing clears the popover's highlight.
+    const id = highlight.id;
+    onclose();
+    app.removeHighlight(id);
+  }
+
+  // Delete / Backspace removes the highlight (unless typing in the note).
+  $effect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if ((e.target as HTMLElement | null)?.closest?.("input, textarea, [contenteditable='true']")) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      remove();
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
+  });
+
   function saveNote() {
-    if (note !== highlight.note) app.updateHighlight(highlight.id, { note: note.trim() });
+    // The popover may be closing (its highlight already cleared).
+    if (highlight && note !== highlight.note) app.updateHighlight(highlight.id, { note: note.trim() });
   }
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div
-  class="highlight-popover no-print absolute z-30 w-64 rounded-lg border bg-popover p-2 text-popover-foreground shadow-lg"
+  class="highlight-popover no-print absolute z-30 w-72 rounded-lg border bg-popover p-2 text-popover-foreground shadow-lg"
   style="left: {x}px; top: {y}px"
   transition:fade={{ duration: 100 }}
   onclick={(e) => e.stopPropagation()}
@@ -62,14 +83,11 @@
         </button>
       {/if}
       <button
-        class="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
-        title="Remove highlight"
-        onclick={() => {
-          onclose();
-          app.removeHighlight(highlight.id);
-        }}
+        class="flex h-6 items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
+        title="Remove highlight (Delete)"
+        onclick={remove}
       >
-        <Trash2 class="size-3.5" />
+        <Trash2 class="size-3.5" /> Remove
       </button>
     </div>
   </div>
