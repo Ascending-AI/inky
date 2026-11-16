@@ -12,6 +12,7 @@ import type { OpenRequest, ThemeName, TreeNode, ViewMode } from "./types";
 import { WELCOME_DOC, MERMAID_TEMPLATE } from "./templates";
 import { extractToc, type TocEntry } from "./markdown";
 import { isImagePath, isInside, remapPath } from "./paths";
+import { forgetPositions, remapPositions } from "./readpos";
 import { lockSync } from "./scrollsync";
 import { newId, type CommentThread } from "./comments";
 import {
@@ -585,6 +586,7 @@ class AppState {
       const newPath = await invoke<string>("move_path", { path, targetDir });
       renamePath(this.nav, path, newPath);
       if (this.imagePath) this.imagePath = remapPath(this.imagePath, path, newPath);
+      remapPositions(path, newPath);
       if (this.currentPath === path) {
         this.currentPath = newPath;
         localStorage.setItem("inky.lastDoc", newPath);
@@ -867,6 +869,7 @@ class AppState {
       const newPath = await invoke<string>("rename_path", { path, newName });
       renamePath(this.nav, path, newPath);
       if (this.imagePath) this.imagePath = remapPath(this.imagePath, path, newPath);
+      remapPositions(path, newPath);
       if (this.currentPath === path) {
         this.currentPath = newPath;
         localStorage.setItem("inky.lastDoc", newPath);
@@ -898,6 +901,7 @@ class AppState {
     try {
       const token = await invoke<string | null>("delete_path", { path });
       forgetPath(this.nav, path);
+      forgetPositions(path);
       if (this.currentPath === path || this.currentPath?.startsWith(path + "/")) {
         this.closeDoc();
       }

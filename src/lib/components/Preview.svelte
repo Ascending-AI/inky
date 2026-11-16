@@ -34,6 +34,7 @@
   import TextQuote from "@lucide/svelte/icons/text-quote";
   import MessageSquarePlus from "@lucide/svelte/icons/message-square-plus";
   import CommentHoverCard from "./CommentHoverCard.svelte";
+  import { capturePosition, getPosition, savePosition, targetScrollTop } from "$lib/readpos";
 
   let container: HTMLDivElement | undefined = $state();
   let scroller: HTMLDivElement | undefined = $state();
@@ -111,14 +112,68 @@
         resolveLocalImages();
         applyCommentHighlights();
         // Back/forward: return to where the reader was (after diagrams have
-        // their final height).
+        // their final height). Otherwise resume the saved reading position.
         if (app.pendingScroll !== null && scroller) {
           scroller.scrollTop = app.pendingScroll;
           app.pendingScroll = null;
+          positionSettled = true;
+        } else if (!positionSettled) {
+          resumeSavedPosition();
         }
       }
     });
   });
+
+  // --- reading position (see $lib/readpos) ----------------------------------
+  /** False until this mount has restored (or decided not to restore) a
+   *  position; scroll events before that must not overwrite the saved one. */
+  let positionSettled = false;
+  let progress = $state(0);
+  let resumed = $state(false);
+  let resumedTimer: ReturnType<typeof setTimeout> | null = null;
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function resumeSavedPosition() {
+    positionSettled = true;
+    if (!container || !scroller || !app.currentPath || app.isMermaidDoc) return;
+    const pos = getPosition(app.currentPath);
+    if (!pos) return;
+    const el = scroller;
+    const box = container;
+    el.scrollTop = targetScrollTop(box, el, pos);
+    let applied = el.scrollTop;
+    // Images without dimensions grow as they load; follow the anchor until
+    // the reader scrolls on their own.
+    for (const img of box.querySelectorAll("img")) {
+      if (img.complete) continue;
+      img.addEventListener(
+        "load",
+        () => {
+          if (Math.abs(el.scrollTop - applied) > 2) return;
+          el.scrollTop = targetScrollTop(box, el, pos);
+          applied = el.scrollTop;
+        },
+        { once: true },
+      );
+    }
+    if (pos.fraction > 0.02) {
+      resumed = true;
+      resumedTimer = setTimeout(() => (resumed = false), 5000);
+    }
+  }
+
+  function saveReadingPosition() {
+    saveTimer = null;
+    if (!positionSettled || !container || !scroller || !app.currentPath) return;
+    // Mid-teardown or hidden panes have no layout; never save from those.
+    if (!scroller.isConnected || scroller.clientHeight === 0) return;
+    savePosition(app.currentPath, capturePosition(container, scroller));
+  }
+
+  function backToTop() {
+    resumed = false;
+    scroller?.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   // Emphasize the active thread's highlight.
   $effect(() => {
@@ -790,9 +845,12 @@
   let spyRaf = 0;
   function onScroll(e: Event) {
     const scrollEl = e.currentTarget as HTMLElement;
+    if (positionSettled && !saveTimer) saveTimer = setTimeout(saveReadingPosition, 400);
     if (spyRaf) return;
     spyRaf = requestAnimationFrame(() => {
       spyRaf = 0;
+      const max = scrollEl.scrollHeight - scrollEl.clientHeight;
+      progress = max > 0 ? Math.min(1, scrollEl.scrollTop / max) : 0;
       if (!container) return;
       const threshold = scrollEl.getBoundingClientRect().top + 90;
       let active: string | null = null;
@@ -869,6 +927,11 @@
     app.previewScroller = scroller ?? null;
     const unregisterSync = scroller ? registerScroller("preview", scroller) : () => {};
     return () => {
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveReadingPosition();
+      }
+      if (resumedTimer) clearTimeout(resumedTimer);
       delete app.searchBackends.preview;
       if (app.previewScroller === scroller) app.previewScroller = null;
       unregisterSync();
@@ -970,6 +1033,34 @@
   onmouseover={onHover}
   onmouseleave={() => (hoverCard = null)}
 >
+  <!-- Zero-height sticky strip: the progress bar and resume pill ride along
+       at the top of the pane without shifting the document. -->
+  <div class="no-print pointer-events-none sticky top-0 z-20 -mx-8 -mt-10 mb-10 h-0">
+    {#if !app.isMermaidDoc}
+      <div
+        class="absolute inset-x-0 top-0 h-0.5 origin-left bg-primary/50 transition-transform duration-150"
+        style="transform: scaleX({progress})"
+      ></div>
+    {/if}
+    {#if resumed}
+      <div class="absolute inset-x-0 top-3 flex justify-center">
+        <div
+          class="pointer-events-auto flex items-center gap-2 rounded-full border bg-popover py-1 pr-1 pl-3 text-xs shadow-md"
+        >
+          <span class="text-muted-foreground">Resumed where you left off</span>
+          <button
+            class="rounded-full px-2 py-0.5 font-medium transition-colors hover:bg-accent"
+            onclick={(e) => {
+              e.stopPropagation();
+              backToTop();
+            }}
+          >
+            Back to top
+          </button>
+        </div>
+      </div>
+    {/if}
+  </div>
   <div class="prose-doc" bind:this={container}>
     <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized via DOMPurify -->
     {@html html}
