@@ -1,5 +1,15 @@
 <script lang="ts">
   import { app, FONT_SCALES, READING_WIDTHS, type ReadingWidth } from "$lib/state.svelte";
+  import {
+    DEFAULT_TYPOGRAPHY,
+    LINE_SPACINGS,
+    PARA_SPACINGS,
+    TYPEFACES,
+    isDefaultTypography,
+    type LineSpacing,
+    type ParaSpacing,
+    type Typeface,
+  } from "$lib/typography";
   import { renderMarkdown } from "$lib/markdown";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
@@ -427,8 +437,77 @@
           </Button>
         {/snippet}
       </Popover.Trigger>
-      <Popover.Content align="end" class="w-72">
+      <Popover.Content align="end" class="w-80">
         <div class="grid gap-4">
+          <div class="grid gap-2">
+            <span class="text-xs font-medium text-muted-foreground">Typeface</span>
+            <div class="grid grid-cols-3 gap-1">
+              {#each Object.entries(TYPEFACES) as [key, face] (key)}
+                {@const active = app.typography.typeface === key}
+                <button
+                  class="flex flex-col items-center gap-0.5 rounded-md border px-1 py-1.5 transition-colors
+                    {active ? 'border-ring bg-secondary' : 'border-transparent hover:bg-accent'}"
+                  onclick={() => app.setTypography({ typeface: key as Typeface })}
+                >
+                  <span
+                    class="text-lg leading-tight"
+                    style="font-family: {face.body ?? 'var(--prose-font)'}">Ag</span
+                  >
+                  <span class="text-[11px] {active ? 'font-semibold' : 'text-muted-foreground'}"
+                    >{face.label}</span
+                  >
+                </button>
+              {/each}
+            </div>
+          </div>
+          <div class="grid gap-2">
+            <span class="text-xs font-medium text-muted-foreground">Line spacing</span>
+            <div class="grid grid-cols-3 gap-1">
+              {#each Object.entries(LINE_SPACINGS) as [key, opt] (key)}
+                <Button
+                  variant={app.typography.lineSpacing === key ? "secondary" : "ghost"}
+                  size="sm"
+                  class="h-7 px-0 text-xs {app.typography.lineSpacing === key ? 'font-semibold' : ''}"
+                  onclick={() => app.setTypography({ lineSpacing: key as LineSpacing })}
+                >
+                  {opt.label}
+                </Button>
+              {/each}
+            </div>
+          </div>
+          <div class="grid gap-2">
+            <span class="text-xs font-medium text-muted-foreground">Paragraph spacing</span>
+            <div class="grid grid-cols-3 gap-1">
+              {#each Object.entries(PARA_SPACINGS) as [key, opt] (key)}
+                <Button
+                  variant={app.typography.paraSpacing === key ? "secondary" : "ghost"}
+                  size="sm"
+                  class="h-7 px-0 text-xs {app.typography.paraSpacing === key ? 'font-semibold' : ''}"
+                  onclick={() => app.setTypography({ paraSpacing: key as ParaSpacing })}
+                >
+                  {opt.label}
+                </Button>
+              {/each}
+            </div>
+          </div>
+          <div class="grid gap-2">
+            <span class="text-xs font-medium text-muted-foreground">Alignment</span>
+            <div class="grid grid-cols-2 gap-1">
+              {#each [{ justify: false, label: "Ragged right" }, { justify: true, label: "Justified" }] as opt (opt.label)}
+                <Button
+                  variant={app.typography.justify === opt.justify ? "secondary" : "ghost"}
+                  size="sm"
+                  class="h-7 px-0 text-xs {app.typography.justify === opt.justify ? 'font-semibold' : ''}"
+                  onclick={() => app.setTypography({ justify: opt.justify })}
+                >
+                  {opt.label}
+                </Button>
+              {/each}
+            </div>
+            <p class="text-[11px] text-muted-foreground">
+              Justified text is hyphenated, like a printed book.
+            </p>
+          </div>
           <div class="grid gap-2">
             <span class="text-xs font-medium text-muted-foreground">Font size</span>
             <div class="flex items-center gap-2">
@@ -470,6 +549,16 @@
               {/each}
             </div>
           </div>
+          {#if !isDefaultTypography(app.typography)}
+            <Button
+              variant="ghost"
+              size="sm"
+              class="h-7 justify-self-start px-2 text-xs text-muted-foreground"
+              onclick={() => app.setTypography({ ...DEFAULT_TYPOGRAPHY })}
+            >
+              Reset typography
+            </Button>
+          {/if}
         </div>
       </Popover.Content>
     </Popover.Root>

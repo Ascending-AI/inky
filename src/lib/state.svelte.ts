@@ -12,7 +12,14 @@ import type { OpenRequest, ThemeName, TreeNode, ViewMode } from "./types";
 import { WELCOME_DOC, MERMAID_TEMPLATE } from "./templates";
 import { extractToc, type TocEntry } from "./markdown";
 import { isImagePath, isInside, remapPath } from "./paths";
-import { forgetPositions, remapPositions } from "./readpos";
+import { capturePosition, forgetPositions, remapPositions, targetScrollTop } from "./readpos";
+import {
+  DEFAULT_TYPOGRAPHY,
+  loadTypography,
+  saveTypography,
+  typographyVars,
+  type Typography,
+} from "./typography";
 import { lockSync } from "./scrollsync";
 import { newId, type CommentThread } from "./comments";
 import {
@@ -78,6 +85,7 @@ class AppState {
   viewMode = $state<ViewMode>("split");
   fontScale = $state(1);
   readingWidth = $state<ReadingWidth>("default");
+  typography = $state<Typography>({ ...DEFAULT_TYPOGRAPHY });
   tocVisible = $state(false);
   activeHeadingId = $state<string | null>(null);
   syncScroll = $state(true);
@@ -101,6 +109,9 @@ class AppState {
   previewScroller: HTMLElement | null = null;
   /** Scroll offset the next mounted Preview should restore (history nav). */
   pendingScroll: number | null = null;
+  /** Set when a document is opened, so the Preview announces a resumed
+   *  position then, and not when it is merely re-mounted (view switch). */
+  announceResume = false;
 
   /** Disk mtime of the open document at last read/write (conflict detection). */
   #docMtime: number | null = null;
@@ -179,6 +190,7 @@ class AppState {
     if (Number.isFinite(storedScale)) this.fontScale = clampScale(storedScale);
     const storedWidth = localStorage.getItem("inky.readingWidth") as ReadingWidth | null;
     if (storedWidth && storedWidth in READING_WIDTHS) this.readingWidth = storedWidth;
+    this.typography = loadTypography();
     this.tocVisible = localStorage.getItem("inky.tocVisible") === "true";
     this.syncScroll = localStorage.getItem("inky.syncScroll") !== "false";
     this.sidebarVisible = localStorage.getItem("inky.sidebar") !== "false";
@@ -339,6 +351,31 @@ class AppState {
     const root = document.documentElement;
     root.style.setProperty("--prose-scale", String(this.fontScale));
     root.style.setProperty("--prose-width", READING_WIDTHS[this.readingWidth].value);
+    for (const [prop, value] of Object.entries(typographyVars(this.typography))) {
+      if (value === null) root.style.removeProperty(prop);
+      else root.style.setProperty(prop, value);
+    }
+    root.classList.toggle("justify-text", this.typography.justify);
+  }
+
+  /** Run a layout-changing update without losing the reader's place. */
+  #keepReadingPosition(update: () => void) {
+    const el = this.previewScroller;
+    const box = el?.querySelector<HTMLElement>(".prose-doc");
+    const pos = el && box ? capturePosition(box, el) : null;
+    update();
+    if (el && box && pos) {
+      lockSync(100);
+      el.scrollTop = targetScrollTop(box, el, pos);
+    }
+  }
+
+  setTypography(patch: Partial<Typography>) {
+    this.#keepReadingPosition(() => {
+      this.typography = { ...this.typography, ...patch };
+      saveTypography(this.typography);
+      this.applyReadingPrefs();
+    });
   }
 
   adjustFontScale(step: -1 | 1) {
@@ -349,21 +386,19 @@ class AppState {
   setFontScale(scale: number) {
     const next = clampScale(scale);
     if (next === this.fontScale) return;
-    const el = this.previewScroller;
-    const frac = el && el.scrollHeight > 0 ? el.scrollTop / el.scrollHeight : null;
-    this.fontScale = next;
-    localStorage.setItem("inky.fontScale", String(next));
-    this.applyReadingPrefs();
-    if (el && frac !== null) {
-      lockSync(100);
-      el.scrollTop = frac * el.scrollHeight;
-    }
+    this.#keepReadingPosition(() => {
+      this.fontScale = next;
+      localStorage.setItem("inky.fontScale", String(next));
+      this.applyReadingPrefs();
+    });
   }
 
   setReadingWidth(width: ReadingWidth) {
-    this.readingWidth = width;
-    localStorage.setItem("inky.readingWidth", width);
-    this.applyReadingPrefs();
+    this.#keepReadingPosition(() => {
+      this.readingWidth = width;
+      localStorage.setItem("inky.readingWidth", width);
+      this.applyReadingPrefs();
+    });
     this.syncMenuChecks();
   }
 
@@ -689,6 +724,7 @@ class AppState {
       // The Preview restores this once it has rendered; writing mode has no
       // Preview, so the editor is scrolled directly below.
       this.pendingScroll = this.viewMode === "editor" ? null : (opts.restoreScroll ?? null);
+      this.announceResume = true;
       this.#clearConflict();
       this.imagePath = null;
       this.currentPath = path;

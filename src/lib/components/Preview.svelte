@@ -118,6 +118,7 @@
         if (app.pendingScroll !== null && scroller) {
           scroller.scrollTop = app.pendingScroll;
           app.pendingScroll = null;
+          app.announceResume = false;
           positionSettled = true;
         } else if (!positionSettled) {
           resumeSavedPosition();
@@ -137,6 +138,8 @@
 
   function resumeSavedPosition() {
     positionSettled = true;
+    const announce = app.announceResume;
+    app.announceResume = false;
     if (!container || !scroller || !app.currentPath || app.isMermaidDoc) return;
     const pos = getPosition(app.currentPath);
     if (!pos) return;
@@ -158,7 +161,7 @@
         { once: true },
       );
     }
-    if (pos.fraction > 0.02) {
+    if (announce && pos.fraction > 0.02) {
       resumed = true;
       resumedTimer = setTimeout(() => (resumed = false), 5000);
     }

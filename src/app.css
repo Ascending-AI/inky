@@ -256,7 +256,14 @@
   font-size: 1.05em;
 }
 .prose-doc p {
-  margin: 0.9em 0;
+  margin: var(--prose-para-gap, 0.9em) 0;
+}
+/* Book layout (Reading settings): justified, hyphenated running text. */
+:root.justify-text .prose-doc p,
+:root.justify-text .prose-doc li {
+  text-align: justify;
+  hyphens: auto;
+  -webkit-hyphens: auto;
 }
 .prose-doc a {
   color: var(--prose-link);
