@@ -611,6 +611,39 @@
 }
 
 /* ---------------------------------- */
+/* Link / footnote hover previews     */
+/* ---------------------------------- */
+
+.prose-doc.link-preview-body {
+  --prose-scale: 0.82;
+  max-width: none;
+  margin: 0;
+}
+/* Long sections fade out instead of ending mid-line. */
+.prose-doc.link-preview-body.clipped {
+  mask-image: linear-gradient(to bottom, black calc(100% - 2.5rem), transparent);
+}
+.prose-doc.link-preview-body > :first-child {
+  margin-top: 0;
+}
+.prose-doc.link-preview-body > :last-child {
+  margin-bottom: 0;
+}
+.prose-doc.link-preview-body h1,
+.prose-doc.link-preview-body h2,
+.prose-doc.link-preview-body h3,
+.prose-doc.link-preview-body h4 {
+  margin: 0 0 0.4em;
+  font-size: 1.15em;
+  border: none;
+  padding: 0;
+}
+.prose-doc.link-preview-body img {
+  max-height: 9rem;
+  width: auto;
+}
+
+/* ---------------------------------- */
 /* In-document search highlights      */
 /* ---------------------------------- */
 

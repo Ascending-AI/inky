@@ -35,6 +35,8 @@
   import MessageSquarePlus from "@lucide/svelte/icons/message-square-plus";
   import CommentHoverCard from "./CommentHoverCard.svelte";
   import { capturePosition, getPosition, savePosition, targetScrollTop } from "$lib/readpos";
+  import { linkTarget, openingHtml } from "$lib/linkpreview";
+  import LinkPreviewCard, { type LinkPreview } from "./LinkPreviewCard.svelte";
 
   let container: HTMLDivElement | undefined = $state();
   let scroller: HTMLDivElement | undefined = $state();
@@ -71,10 +73,10 @@
 
   // Local images can't load from raw file paths inside the webview; route
   // them through Tauri's asset protocol, resolved relative to the document.
-  function resolveLocalImages() {
-    if (!container || !app.currentPath) return;
-    const dir = app.currentPath.slice(0, app.currentPath.lastIndexOf("/"));
-    for (const img of container.querySelectorAll("img")) {
+  function resolveLocalImages(root: ParentNode | undefined = container, docPath = app.currentPath) {
+    if (!root || !docPath) return;
+    const dir = docPath.slice(0, docPath.lastIndexOf("/"));
+    for (const img of root.querySelectorAll("img")) {
       const src = img.getAttribute("src") ?? "";
       if (!src || /^(https?:|data:|blob:|asset:|\/\/)/.test(src)) continue;
       const abs = src.startsWith("/") ? src : `${dir}/${src.replace(/^\.\//, "")}`;
@@ -479,6 +481,10 @@
    * restores the selection, and applies the key.
    */
   function onGlobalKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape" && linkCard) {
+      hideLinkCard(0);
+      return;
+    }
     if (app.viewMode !== "preview" || app.isMermaidDoc || !container) return;
     healStuckSession();
     // Rescue hatch: Escape always ends whatever editing session exists,
@@ -817,7 +823,116 @@
     return hc ? (app.commentThreads.find((t) => t.id === hc.id) ?? null) : null;
   });
 
+  // --- link and footnote previews (see $lib/linkpreview) --------------------
+  let linkCard = $state<LinkPreview | null>(null);
+  /** The link the pointer is over (or whose card is showing). */
+  let linkAnchor: HTMLAnchorElement | null = null;
+  let linkHref = "";
+  let linkShowTimer: ReturnType<typeof setTimeout> | null = null;
+  let linkHideTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Rendered openings of linked documents, by resolved path. */
+  const docOpenings = new Map<string, string>();
+
+  function cancelLinkHide() {
+    if (linkHideTimer) clearTimeout(linkHideTimer);
+    linkHideTimer = null;
+  }
+
+  function hideLinkCard(delay = 160) {
+    if (linkShowTimer) clearTimeout(linkShowTimer);
+    linkShowTimer = null;
+    cancelLinkHide();
+    linkHideTimer = setTimeout(() => {
+      linkCard = null;
+      linkAnchor = null;
+    }, delay);
+  }
+
+  function onLinkHover(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (target.closest?.(".link-preview")) return;
+    const a = blockEditing ? null : target.closest?.<HTMLAnchorElement>("a[href]");
+    const anchor = a && container?.contains(a) ? a : null;
+    if (anchor === linkAnchor) {
+      cancelLinkHide();
+      return;
+    }
+    if (!anchor) {
+      if (linkAnchor) hideLinkCard();
+      return;
+    }
+    linkAnchor = anchor;
+    cancelLinkHide();
+    if (linkShowTimer) clearTimeout(linkShowTimer);
+    // Moving from one link to the next while a card is up feels instant.
+    linkShowTimer = setTimeout(() => showLinkCard(anchor), linkCard ? 60 : 350);
+  }
+
+  async function showLinkCard(anchor: HTMLAnchorElement) {
+    linkShowTimer = null;
+    if (!container || !scroller || anchor !== linkAnchor) return;
+    const t = linkTarget(anchor, container);
+    if (!t) {
+      linkCard = null;
+      return;
+    }
+    let content: Pick<LinkPreview, "label" | "html" | "url" | "hint">;
+    if (t.kind === "external") {
+      content = { label: "External link", html: "", url: t.url, hint: "Click to open in your browser" };
+    } else if (t.kind === "doc") {
+      const opening = await docOpening(t.href, t.fragment);
+      if (!opening || anchor !== linkAnchor) return;
+      content = { label: opening.label, html: opening.html, hint: "Click to open" };
+    } else {
+      if (!t.html.trim()) return;
+      content = {
+        label: t.label,
+        html: t.html,
+        hint: t.kind === "footnote" ? "Click to jump to the footnote" : "Click to jump there",
+      };
+    }
+    const rect = anchor.getBoundingClientRect();
+    const srect = scroller.getBoundingClientRect();
+    const width = Math.min(352, srect.width - 16);
+    const above = srect.bottom - rect.bottom < 300 && rect.top - srect.top > 300;
+    linkHref = anchor.getAttribute("href") ?? "";
+    linkCard = {
+      ...content,
+      x: Math.max(8, Math.min(rect.left - srect.left, srect.width - width - 8)),
+      y: (above ? rect.top - 6 : rect.bottom + 6) - srect.top + scroller.scrollTop,
+      above,
+    };
+  }
+
+  async function docOpening(
+    href: string,
+    fragment: string | null,
+  ): Promise<{ label: string; html: string } | null> {
+    if (!app.currentPath) return null;
+    try {
+      const { path } = await invoke<{ path: string; doc: boolean }>("follow_link", {
+        fromDoc: app.currentPath,
+        href,
+      });
+      const key = `${path}#${fragment ?? ""}`;
+      let html = docOpenings.get(key);
+      if (html === undefined) {
+        const src = await invoke<string>("read_doc", { path });
+        const tpl = document.createElement("template");
+        tpl.innerHTML = openingHtml(renderMarkdown(src), fragment);
+        resolveLocalImages(tpl.content, path);
+        html = tpl.innerHTML;
+        docOpenings.set(key, html);
+      }
+      const name = path.split("/").pop()?.replace(/\.(md|markdown)$/i, "") ?? path;
+      return html ? { label: name, html } : null;
+    } catch {
+      return null; // Missing target or link not saved yet: just no preview.
+    }
+  }
+
   function onHover(e: MouseEvent) {
+    onLinkHover(e);
     const mark = (e.target as HTMLElement).closest?.<HTMLElement>("mark.comment-hl");
     if (mark?.dataset.threadId && scroller) {
       const rect = mark.getBoundingClientRect();
@@ -975,6 +1090,7 @@
     }
     const anchor = (event.target as HTMLElement).closest("a");
     if (anchor) {
+      hideLinkCard(0);
       // Never let a link navigate the webview itself (that's how you end up
       // on an unescapable 404 page).
       event.preventDefault();
@@ -1031,7 +1147,10 @@
   onscroll={onScroll}
   onmouseup={onMouseUp}
   onmouseover={onHover}
-  onmouseleave={() => (hoverCard = null)}
+  onmouseleave={() => {
+    hoverCard = null;
+    if (linkAnchor) hideLinkCard();
+  }}
 >
   <!-- Zero-height sticky strip: the progress bar and resume pill ride along
        at the top of the pane without shifting the document. -->
@@ -1077,6 +1196,18 @@
     >
       <MessageSquarePlus class="size-3.5" /> Comment
     </button>
+  {/if}
+  {#if linkCard}
+    <LinkPreviewCard
+      preview={linkCard}
+      onenter={cancelLinkHide}
+      onleave={() => hideLinkCard()}
+      onopen={() => {
+        const href = linkHref;
+        hideLinkCard(0);
+        handleLink(href);
+      }}
+    />
   {/if}
   {#if hoverThread && hoverCard}
     <CommentHoverCard thread={hoverThread} x={hoverCard.x} y={hoverCard.y} />
