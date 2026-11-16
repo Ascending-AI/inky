@@ -83,6 +83,40 @@ pub fn is_watch_relevant(root: &Path, path: &Path) -> bool {
     (is_doc(path) || is_image(path) || folder) && !is_skipped_path(rel) && !ignores::is_hidden(root, path)
 }
 
+/// Replace `path`'s contents in one step: write a hidden temporary file next
+/// to it, then rename it over the original. Readers (agents, editors, the
+/// watcher) see the old file or the new one, never a half-written one. A
+/// symlinked document is written through in place, keeping the link.
+pub fn write_atomic(path: &Path, content: &str) -> Result<(), String> {
+    let is_link = fs::symlink_metadata(path).map(|m| m.file_type().is_symlink()).unwrap_or(false);
+    let Some(dir) = path.parent().filter(|_| !is_link) else {
+        return fs::write(path, content).map_err(|e| e.to_string());
+    };
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = dir.join(format!(".{name}.{}.inky-tmp", new_id("w")));
+    let result = (|| {
+        fs::write(&tmp, content)?;
+        // Keep the original's permissions (a fresh file would get the default).
+        if let Ok(meta) = fs::metadata(path) {
+            let _ = fs::set_permissions(&tmp, meta.permissions());
+        }
+        fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result.map_err(|e| e.to_string())
+}
+
+/// Outcome of a conditional write (see `Library::write_if`).
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum WriteOutcome {
+    Written,
+    /// The file no longer holds what the caller last saw; nothing was written.
+    Conflict { disk: String },
+}
+
 /// A directory entry the tree/walk should not descend into or list.
 fn skip_entry(entry: &fs::DirEntry, name: &str) -> bool {
     if name.starts_with('.') {
@@ -614,7 +648,44 @@ impl Library {
         if self.sidecars && fs::read_to_string(&p).map(|old| old != content).unwrap_or(false) {
             snapshot(&p, self.agent_origin);
         }
-        fs::write(p, content).map_err(|e| e.to_string())
+        write_atomic(&p, content)
+    }
+
+    /// Write only if the file still holds `expected` (what the caller last
+    /// loaded or saved): a save must never overwrite a newer version made
+    /// by someone else (an agent, another app). On a mismatch nothing is
+    /// written and the current contents come back. A missing file is
+    /// (re)created.
+    pub fn write_if(&self, path: &str, content: &str, expected: Option<&str>) -> Result<WriteOutcome, String> {
+        let p = self.resolve(path)?;
+        if let Some(expected) = expected {
+            match fs::read_to_string(&p) {
+                Ok(disk) if disk != expected => return Ok(WriteOutcome::Conflict { disk }),
+                Err(e) if p.exists() => return Err(e.to_string()),
+                _ => {}
+            }
+        }
+        self.write(path, content)?;
+        Ok(WriteOutcome::Written)
+    }
+
+    /// Read a file that may still be being written (an agent saving it right
+    /// now): wait until it was last modified a moment ago and holds still
+    /// while read, so a half-written file is never taken for the document.
+    pub fn read_settled(&self, path: &str) -> Result<String, String> {
+        let p = self.resolve(path)?;
+        const QUIET: std::time::Duration = std::time::Duration::from_millis(150);
+        for _ in 0..12 {
+            let before = fs::metadata(&p).map_err(|e| e.to_string())?;
+            let text = fs::read_to_string(&p).map_err(|e| e.to_string())?;
+            let after = fs::metadata(&p).map_err(|e| e.to_string())?;
+            let quiet = before.modified().ok().and_then(|m| m.elapsed().ok()).is_some_and(|age| age >= QUIET);
+            if quiet && before.len() == after.len() && before.modified().ok() == after.modified().ok() {
+                return Ok(text);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        fs::read_to_string(&p).map_err(|e| e.to_string())
     }
 
     /// Replace `old_text` (which must occur exactly once) with `new_text`.
@@ -631,18 +702,7 @@ impl Library {
         if self.sidecars {
             snapshot(&p, self.agent_origin);
         }
-        fs::write(p, content.replacen(old_text, new_text, 1)).map_err(|e| e.to_string())
-    }
-
-    /// Last-modified time in epoch milliseconds.
-    pub fn mtime(&self, path: &str) -> Result<u64, String> {
-        let p = self.resolve(path)?;
-        let meta = fs::metadata(p).map_err(|e| e.to_string())?;
-        meta.modified()
-            .map_err(|e| e.to_string())?
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .map_err(|e| e.to_string())
+        write_atomic(&p, &content.replacen(old_text, new_text, 1))
     }
 
     // --- history + search ---
@@ -1207,6 +1267,75 @@ mod tests {
     }
 
     #[test]
+    fn write_if_never_overwrites_a_newer_version() {
+        let (_d, lib) = temp_lib();
+        lib.write("a.md", "v1").unwrap();
+        // Inky saves on top of what it loaded: fine.
+        assert_eq!(lib.write_if("a.md", "v2 mine", Some("v1")).unwrap(), WriteOutcome::Written);
+        // An agent writes meanwhile; Inky's next save (still based on "v2 mine") must not clobber it.
+        fs::write(lib.root().join("a.md"), "v3 agent").unwrap();
+        assert_eq!(
+            lib.write_if("a.md", "v4 mine", Some("v2 mine")).unwrap(),
+            WriteOutcome::Conflict { disk: "v3 agent".into() }
+        );
+        assert_eq!(lib.read("a.md").unwrap(), "v3 agent", "nothing was written");
+        // No expectation (an explicit "keep mine") writes, and a missing file is recreated.
+        assert_eq!(lib.write_if("a.md", "forced", None).unwrap(), WriteOutcome::Written);
+        fs::remove_file(lib.root().join("a.md")).unwrap();
+        assert_eq!(lib.write_if("a.md", "back", Some("forced")).unwrap(), WriteOutcome::Written);
+        assert_eq!(lib.read("a.md").unwrap(), "back");
+    }
+
+    #[test]
+    fn writes_are_atomic_and_keep_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_d, lib) = temp_lib();
+        lib.write("p.md", "one").unwrap();
+        let file = lib.root().join("p.md");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+        lib.write("p.md", "two").unwrap();
+        lib.patch("p.md", "two", "three").unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "three");
+        assert_eq!(fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        let leftovers: Vec<_> = fs::read_dir(lib.root())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".inky-tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "no temporary files left behind");
+    }
+
+    #[test]
+    fn writes_through_a_symlinked_document() {
+        // (Links out of the library are refused by `resolve`; this one stays inside.)
+        let (_d, lib) = temp_lib();
+        lib.write("notes/real.md", "old").unwrap();
+        let real = lib.root().join("notes/real.md");
+        std::os::unix::fs::symlink(&real, lib.root().join("link.md")).unwrap();
+        lib.write("link.md", "new").unwrap();
+        assert!(fs::symlink_metadata(lib.root().join("link.md")).unwrap().file_type().is_symlink());
+        assert_eq!(fs::read_to_string(&real).unwrap(), "new");
+    }
+
+    #[test]
+    fn read_settled_returns_the_finished_file() {
+        let (_d, lib) = temp_lib();
+        let file = lib.root().join("s.md");
+        fs::write(&file, "part").unwrap();
+        let writer = {
+            let file = file.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(60));
+                fs::write(&file, "part and the rest").unwrap();
+            })
+        };
+        // Read right away: the file was just touched, so this waits for it to settle.
+        let text = lib.read_settled("s.md").unwrap();
+        writer.join().unwrap();
+        assert_eq!(text, "part and the rest");
+    }
+
+    #[test]
     fn inkyignore_hides_from_tree_walk_search_and_watcher() {
         let (_d, lib) = temp_lib();
         lib.write("Notes/a.md", "needle").unwrap();
@@ -1306,12 +1435,6 @@ mod tests {
         assert_eq!(lib.read("p.md").unwrap(), "alpha gamma alpha\n");
     }
 
-    #[test]
-    fn mtime_is_epoch_millis() {
-        let (_d, lib) = temp_lib();
-        lib.write("m.md", "").unwrap();
-        assert!(lib.mtime("m.md").unwrap() > 1_600_000_000_000);
-    }
 
     // --- Task 3: versions + search ------------------------------------------
 

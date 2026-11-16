@@ -81,3 +81,63 @@ export function htmlToMarkdown(html: string): string {
       .replace(/^(\s*(?:[-*+]|\d+\.) \[[ xX]\]) +/gm, "$1 ")
   );
 }
+
+/**
+ * Apply an in-place edit to a block's markdown source without rewriting
+ * the rest of it. `before` and `after` are the block's HTML converted to
+ * markdown before and after the edit; that conversion is not faithful
+ * (it adds escapes, normalizes markers), so only the span that actually
+ * changed between them is spliced into `source`, located by its
+ * surrounding text. Returns null when that span can't be placed safely.
+ */
+export function spliceEdit(source: string, before: string, after: string): string | null {
+  if (before === after) return source;
+  if (source === before) return after;
+  let p = 0;
+  while (p < before.length && p < after.length && before[p] === after[p]) p++;
+  let s = 0;
+  while (
+    s < before.length - p &&
+    s < after.length - p &&
+    before[before.length - 1 - s] === after[after.length - 1 - s]
+  ) {
+    s++;
+  }
+  const oldMid = before.slice(p, before.length - s);
+  const newMid = after.slice(p, after.length - s);
+  // Score each place the old span could sit in the source by how much of the
+  // surrounding text matches there (the conversion's escapes stop a match
+  // early, so this is a count, not an exact comparison).
+  const leftMatch = (i: number) => {
+    let k = 0;
+    while (k < p && k < i && before[p - 1 - k] === source[i - 1 - k]) k++;
+    return k;
+  };
+  const rightMatch = (j: number) => {
+    let k = 0;
+    const r = before.length - s;
+    while (k < s && j + k < source.length && before[r + k] === source[j + k]) k++;
+    return k;
+  };
+  let best = -1;
+  let bestScore = -1;
+  let tie = false;
+  const consider = (i: number) => {
+    const score = leftMatch(i) + rightMatch(i + oldMid.length);
+    if (score > bestScore) {
+      bestScore = score;
+      best = i;
+      tie = false;
+    } else if (score === bestScore) {
+      tie = true;
+    }
+  };
+  if (oldMid) {
+    for (let i = source.indexOf(oldMid); i !== -1; i = source.indexOf(oldMid, i + 1)) consider(i);
+  } else {
+    for (let i = 0; i <= source.length; i++) consider(i);
+  }
+  // Demand enough matching context to be sure, and a single best place.
+  if (best < 0 || tie || bestScore < Math.min(8, p + s)) return null;
+  return source.slice(0, best) + newMid + source.slice(best + oldMid.length);
+}

@@ -13,7 +13,7 @@ import { WELCOME_DOC, MERMAID_TEMPLATE } from "./templates";
 import { extractToc, type TocEntry } from "./markdown";
 import { isImagePath, isInside, remapPath } from "./paths";
 import { capturePosition, forgetPositions, remapPositions, targetScrollTop } from "./readpos";
-import { baselineAfterEdit, diffBlocks, type ChangeSet } from "./changes";
+import { baselineAfterEdit, diffBlocks, merge3, type ChangeSet, type MergeConflict } from "./changes";
 import {
   forgetInStore,
   isColor,
@@ -57,7 +57,6 @@ export interface CommentDraft {
 export type { TocEntry };
 
 const THEMES: ThemeName[] = ["light", "dark", "book"];
-const CONFLICT_TOAST = "save-conflict";
 
 export { FONT_SCALES };
 
@@ -135,11 +134,34 @@ class AppState {
    *  position then, and not when it is merely re-mounted (view switch). */
   announceResume = false;
 
-  /** Disk mtime of the open document at last read/write (conflict detection). */
-  #docMtime: number | null = null;
-  /** An outside document changed on disk under unsaved edits; the toast asking
-   * Overwrite/Reload is up, so autosave holds off until the user picks. */
-  #conflictPending = false;
+  /**
+   * The open document changed on disk (an agent, another app) in the same
+   * places the reader edited. The conflict dialog is up; autosave holds off
+   * until the reader picks. `savedContent` already holds `theirs`.
+   */
+  conflict = $state<{
+    path: string;
+    mine: string;
+    theirs: string;
+    /** Their version with the reader's other (non-clashing) edits merged in. */
+    merged: string;
+    conflicts: MergeConflict[];
+  } | null>(null);
+  /** A block is being edited in place in the reading pane (see Preview). */
+  #editingInPlace = false;
+  /** A disk change arrived during an in-place edit; check once it ends. */
+  #diskCheckPending = false;
+
+  get editingInPlace() {
+    return this.#editingInPlace;
+  }
+  set editingInPlace(on: boolean) {
+    this.#editingInPlace = on;
+    if (!on && this.#diskCheckPending) {
+      this.#diskCheckPending = false;
+      this.syncFromDisk();
+    }
+  }
 
   commentsVisible = $state(false);
   highlightsVisible = $state(false);
@@ -283,15 +305,15 @@ class AppState {
     listen("library-changed", () => this.syncFromDisk());
     // Never let a debounced autosave die with the focus.
     window.addEventListener("blur", () => {
-      if (this.dirty && !this.#conflictPending) this.save();
+      if (this.dirty && !this.conflict) this.save();
     });
     // Red-button close: flush unsaved changes first.
     getCurrentWindow().onCloseRequested(async (event) => {
       if (this.dirty) {
         event.preventDefault();
         await this.save();
-        // Unresolved conflict: stay open so Overwrite/Reload can be chosen.
-        if (!this.#conflictPending) getCurrentWindow().destroy();
+        // Unresolved conflict: stay open so the reader can choose.
+        if (!this.conflict) getCurrentWindow().destroy();
       }
     });
 
@@ -313,7 +335,7 @@ class AppState {
   /** ⌘Q — save, then exit. */
   async quitApp() {
     if (this.dirty) await this.save();
-    if (this.#conflictPending) return;
+    if (this.conflict) return;
     await invoke("quit_app");
   }
 
@@ -851,17 +873,14 @@ class AppState {
 
   async syncFromDisk() {
     await this.refreshTree();
-    if (this.currentPath && !this.dirty) {
+    const path = this.currentPath;
+    if (path && this.#editingInPlace) {
+      // Swapping the text under an open in-place edit would misplace it.
+      this.#diskCheckPending = true;
+    } else if (path && !this.conflict) {
       try {
-        const disk = await invoke<string>("read_doc", { path: this.currentPath });
-        if (disk !== this.savedContent) {
-          this.savedContent = disk;
-          this.content = disk;
-          this.#recomputeChanges();
-        }
-        this.#docMtime = await invoke<number>("doc_mtime", { path: this.currentPath }).catch(
-          () => null,
-        );
+        const disk = await invoke<string>("read_doc", { path });
+        if (disk !== this.savedContent) await this.#takeDiskChange(path, disk);
       } catch {
         // File disappeared from disk; keep the buffer so the user can re-save.
       }
@@ -921,6 +940,8 @@ class AppState {
     opts: { silent?: boolean; restoreScroll?: number } = {},
   ): Promise<boolean> {
     if (this.dirty) await this.save();
+    // Saving surfaced a conflict: resolve it before leaving, or edits are lost.
+    if (this.conflict && path !== this.currentPath) return false;
     const leaving = this.#here();
     try {
       const text = await invoke<string>("read_doc", { path });
@@ -931,7 +952,7 @@ class AppState {
       // Preview, so the editor is scrolled directly below.
       this.pendingScroll = this.viewMode === "editor" ? null : (opts.restoreScroll ?? null);
       this.announceResume = true;
-      this.#clearConflict();
+      this.conflict = null;
       this.imagePath = null;
       this.mediaView = null;
       if (path !== this.currentPath) {
@@ -941,7 +962,6 @@ class AppState {
       this.currentPath = path;
       this.content = text;
       this.savedContent = text;
-      this.#docMtime = await invoke<number>("doc_mtime", { path }).catch(() => null);
       await this.#loadChanges(path, text);
       localStorage.setItem("inky.lastDoc", path);
       getCurrentWindow().setTitle(`${this.docName.replace(/\.(md|markdown|mmd)$/i, "")} — Inky`);
@@ -1011,7 +1031,7 @@ class AppState {
   }
 
   closeDoc() {
-    this.#clearConflict();
+    this.conflict = null;
     this.currentPath = null;
     this.changes = null;
     this.#baseline = null;
@@ -1025,39 +1045,143 @@ class AppState {
     getCurrentWindow().setTitle("Inky");
   }
 
-  async save(opts: { force?: boolean } = {}) {
+  /**
+   * Save the open document. Only edits are ever written, and only on top of
+   * the version Inky last loaded: if the file changed since (an agent
+   * edited it), nothing is overwritten; the change is merged in instead.
+   */
+  async save() {
     if (!this.currentPath) return;
     if (this.#autosaveTimer) {
       clearTimeout(this.#autosaveTimer);
       this.#autosaveTimer = null;
     }
+    if (this.conflict) return;
     const path = this.currentPath;
     const text = this.content;
-    const edited = text !== this.savedContent;
+    const base = this.savedContent;
+    // An unedited buffer is never written: it could only clobber a newer file.
+    if (text === base) return;
+    await this.#write(path, text, base);
+  }
+
+  /** Write `text` if the file still holds `expected`; merge otherwise. */
+  async #write(path: string, text: string, expected: string): Promise<boolean> {
     try {
-      // Warn if the file changed on disk while we were editing (an agent via
-      // MCP, another machine, …). In the library write_doc snapshots the disk
-      // version first, so nothing is lost. Outside documents have no history,
-      // so the user decides before anything is overwritten.
-      if (this.#docMtime !== null && !opts.force) {
-        const current = await invoke<number>("doc_mtime", { path }).catch(() => null);
-        if (current !== null && current !== this.#docMtime) {
-          if (!this.docSidecars) {
-            this.#showConflict(path);
-            return;
-          }
-          toast.warning(
-            "This document changed on disk while you were editing. Your version was saved; the other one was kept in .inky-history.",
-          );
-        }
+      const res = await invoke<{ status: "written" } | { status: "conflict"; disk: string }>(
+        "write_doc",
+        { path, content: text, expected },
+      );
+      if (res.status === "conflict") {
+        await this.#takeDiskChange(path, res.disk);
+        return false;
       }
-      this.#clearConflict();
-      await invoke("write_doc", { path, content: text });
-      this.savedContent = text;
-      this.#docMtime = await invoke<number>("doc_mtime", { path }).catch(() => null);
-      if (edited) this.#noteOwnEdit(path, text);
+      if (path === this.currentPath) this.savedContent = text;
+      this.#noteOwnEdit(path, text);
+      return true;
     } catch (e) {
       toast.error(`Save failed: ${e}`);
+      return false;
+    }
+  }
+
+  /**
+   * The file on disk now holds `theirs` (someone else saved it). With no
+   * edits of ours, just show it; with edits, merge them into it; where both
+   * changed the same paragraph, ask (the conflict dialog).
+   */
+  async #takeDiskChange(path: string, theirs: string) {
+    if (path !== this.currentPath) return;
+    const base = this.savedContent;
+    const mine = this.content;
+    if (theirs === base) return;
+    this.savedContent = theirs;
+    if (mine === base || mine === theirs) {
+      this.content = theirs;
+      this.#recomputeChanges();
+      return;
+    }
+    const merged = merge3(base, mine, theirs);
+    if (merged.conflicts.length === 0) {
+      this.content = merged.text;
+      this.#recomputeChanges();
+      toast.info(`${path.split("/").pop()} changed outside Inky; your edits were merged in.`);
+      if (this.content !== this.savedContent) this.scheduleAutosave();
+      return;
+    }
+    this.conflict = { path, mine, theirs, merged: merged.text, conflicts: merged.conflicts };
+  }
+
+  /** Conflict dialog: take their version (dropping the reader's edits). */
+  useTheirVersion() {
+    const c = this.conflict;
+    if (!c || c.path !== this.currentPath) return;
+    this.conflict = null;
+    this.content = c.theirs;
+    this.#recomputeChanges();
+  }
+
+  /** Conflict dialog: their version plus the reader's edits that don't clash. */
+  async useMergedVersion() {
+    const c = this.conflict;
+    if (!c || c.path !== this.currentPath) return;
+    this.conflict = null;
+    this.content = c.merged;
+    this.#recomputeChanges();
+    if (c.merged !== c.theirs) await this.#write(c.path, c.merged, c.theirs);
+  }
+
+  /** Conflict dialog: write the reader's version over theirs (library
+   *  documents keep theirs in version history). */
+  async keepMyVersion() {
+    const c = this.conflict;
+    if (!c || c.path !== this.currentPath) return;
+    this.conflict = null;
+    this.content = c.mine;
+    await this.#write(c.path, c.mine, c.theirs);
+  }
+
+  /** Conflict dialog: keep both — the reader's version as a new document
+   *  next to it, and theirs in place. */
+  async saveMineAsCopy() {
+    const c = this.conflict;
+    if (!c || c.path !== this.currentPath) return;
+    const dir = c.path.slice(0, c.path.lastIndexOf("/"));
+    const file = c.path.split("/").pop() ?? "Untitled.md";
+    const ext = file.match(/\.(md|markdown|mmd)$/i)?.[1] ?? "md";
+    const stem = file.replace(/\.(md|markdown|mmd)$/i, "");
+    try {
+      const copy = await invoke<string>("create_doc", { dir, name: `${stem} (my edits)`, ext, content: c.mine });
+      await this.refreshTree();
+      this.useTheirVersion();
+      toast.success(`Your version was saved as ${copy.split("/").pop()}`, {
+        action: { label: "Open", onClick: () => this.openDoc(copy) },
+      });
+    } catch (e) {
+      toast.error(`Could not save a copy: ${e}`);
+    }
+  }
+
+  scheduleAutosave() {
+    if (this.#autosaveTimer) clearTimeout(this.#autosaveTimer);
+    this.#autosaveTimer = setTimeout(() => {
+      this.#autosaveTimer = null;
+      if (!this.conflict) this.save();
+    }, 1200);
+  }
+
+  /** Drop unsaved edits and show the document as it is on disk. */
+  async reloadFromDisk() {
+    this.conflict = null;
+    const path = this.currentPath;
+    if (!path) return;
+    try {
+      const text = await invoke<string>("read_doc", { path });
+      this.content = text;
+      this.savedContent = text;
+      this.#recomputeChanges();
+    } catch (e) {
+      toast.error(`Could not reload: ${e}`);
     }
   }
 
@@ -1096,46 +1220,6 @@ class AppState {
     this.#baseline = this.content;
     this.changes = null;
     invoke("write_baseline", { path, content: this.content }).catch(() => {});
-  }
-
-  scheduleAutosave() {
-    if (this.#autosaveTimer) clearTimeout(this.#autosaveTimer);
-    this.#autosaveTimer = setTimeout(() => {
-      this.#autosaveTimer = null;
-      if (!this.#conflictPending) this.save();
-    }, 1200);
-  }
-
-  #showConflict(path: string) {
-    this.#conflictPending = true;
-    toast.warning(`${path.split("/").pop()} changed on disk while you were editing.`, {
-      id: CONFLICT_TOAST,
-      duration: Infinity,
-      action: { label: "Overwrite", onClick: () => this.save({ force: true }) },
-      cancel: { label: "Reload", onClick: () => this.reloadFromDisk() },
-    });
-  }
-
-  #clearConflict() {
-    if (!this.#conflictPending) return;
-    this.#conflictPending = false;
-    toast.dismiss(CONFLICT_TOAST);
-  }
-
-  /** Drop unsaved edits and show the document as it is on disk. */
-  async reloadFromDisk() {
-    this.#clearConflict();
-    const path = this.currentPath;
-    if (!path) return;
-    try {
-      const text = await invoke<string>("read_doc", { path });
-      this.content = text;
-      this.savedContent = text;
-      this.#recomputeChanges();
-      this.#docMtime = await invoke<number>("doc_mtime", { path }).catch(() => null);
-    } catch (e) {
-      toast.error(`Could not reload: ${e}`);
-    }
   }
 
   async newDoc(dir?: string, kind: "markdown" | "mermaid" = "markdown") {

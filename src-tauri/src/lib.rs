@@ -234,13 +234,22 @@ fn unhide_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn read_doc(app: tauri::AppHandle, path: String) -> Result<String, String> {
-    place(&app, &path)?.doc(&path)?.read(&path)
+async fn read_doc(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    // Async: waiting for a file that is still being written must not block the UI.
+    place(&app, &path)?.doc(&path)?.read_settled(&path)
 }
 
+/// Save a document. `expected` is what Inky last loaded or saved; if the
+/// file changed since (an agent edited it), nothing is written and the
+/// newer contents come back so the app can merge instead of overwriting.
 #[tauri::command]
-fn write_doc(app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
-    place(&app, &path)?.doc(&path)?.write(&path, &content)
+fn write_doc(
+    app: tauri::AppHandle,
+    path: String,
+    content: String,
+    expected: Option<String>,
+) -> Result<library::WriteOutcome, String> {
+    place(&app, &path)?.doc(&path)?.write_if(&path, &content, expected.as_deref())
 }
 
 #[tauri::command]
@@ -418,11 +427,6 @@ fn save_image(
     fs::write(&path, bytes).map_err(|e| e.to_string())?;
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     Ok(format!("assets/{name}"))
-}
-
-#[tauri::command]
-fn doc_mtime(app: tauri::AppHandle, path: String) -> Result<u64, String> {
-    place(&app, &path)?.doc(&path)?.mtime(&path)
 }
 
 #[tauri::command]
@@ -1035,7 +1039,6 @@ pub fn run() {
             search_library,
             list_versions,
             read_version,
-            doc_mtime,
             doc_sidecars,
             workspace_root,
             clear_workspace,

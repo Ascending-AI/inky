@@ -17,7 +17,8 @@ notes are always yours.
 - **Paste** — copy any markdown, hit the clipboard button (or ⌘⇧V) and it
   becomes a new document.
 - **Edit** — switch between *Reading*, *Split* and *Writing* views from the
-  toolbar (or ⌘1 / ⌘2 / ⌘3). Changes autosave.
+  toolbar (or ⌘1 / ⌘2 / ⌘3). In *Reading*, double-click a paragraph to edit it
+  in place. Changes autosave.
 - **Organize** — right-click the sidebar to create folders, rename or delete.
 - **Export** — ⌘P opens the print dialog; choose *Save as PDF*.
 - **Themes** — light, dark and book mode, for easy reading.

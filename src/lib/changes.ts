@@ -115,3 +115,84 @@ export function baselineAfterEdit(current: string, changes: ChangeSet): string {
   out.push(...(changes.removedBefore.get(END) ?? []));
   return out.join("\n\n") + "\n";
 }
+
+// --- three-way merge -----------------------------------------------------------
+
+/** A block plus the text up to the next block (its trailing blank lines). */
+interface Segment {
+  key: string;
+  text: string;
+}
+
+function segments(src: string): Segment[] {
+  const blocks = extractBlocks(src);
+  return blocks
+    .map((b, i) => ({
+      key: src.slice(b.start, b.end).trim(),
+      text: src.slice(b.start, i + 1 < blocks.length ? blocks[i + 1].start : src.length),
+    }))
+    .filter((s) => s.key);
+}
+
+export interface MergeConflict {
+  base: string;
+  mine: string;
+  theirs: string;
+}
+
+export interface MergeResult {
+  text: string;
+  /** Places both sides changed differently; `text` holds their version there. */
+  conflicts: MergeConflict[];
+}
+
+/**
+ * Merge the reader's edits (`mine`) with someone else's (`theirs`), both
+ * made on top of `base`, block by block: a block changed on one side takes
+ * that side; changed identically on both, either; changed differently on
+ * both, it is a conflict. Untouched stretches keep `theirs`' exact text.
+ */
+export function merge3(base: string, mine: string, theirs: string): MergeResult {
+  const B = segments(base);
+  const M = segments(mine);
+  const T = segments(theirs);
+  const keys = (s: Segment[]) => s.map((x) => x.key);
+  const inMine = new Map(lcsPairs(keys(B), keys(M)));
+  const inTheirs = new Map(lcsPairs(keys(B), keys(T)));
+  const same = (a: Segment[], b: Segment[]) => a.length === b.length && a.every((x, n) => x.key === b[n].key);
+  const joined = (s: Segment[]) => s.map((x) => x.text).join("").trim();
+
+  const out: Segment[] = [];
+  const conflicts: MergeConflict[] = [];
+  let i = 0;
+  let j = 0;
+  let k = 0;
+  for (let b = 0; b <= B.length; b++) {
+    // A block both sides kept closes the stretch before it.
+    const end = b === B.length;
+    if (!end && !(inMine.has(b) && inTheirs.has(b))) continue;
+    const mj = end ? M.length : inMine.get(b)!;
+    const tk = end ? T.length : inTheirs.get(b)!;
+    if (mj < j || tk < k) continue;
+    const cb = B.slice(i, b);
+    const cm = M.slice(j, mj);
+    const ct = T.slice(k, tk);
+    if (same(cm, cb)) out.push(...ct);
+    else if (same(ct, cb) || same(cm, ct)) out.push(...cm);
+    else {
+      conflicts.push({ base: joined(cb), mine: joined(cm), theirs: joined(ct) });
+      out.push(...ct);
+    }
+    if (!end) out.push(T[tk]);
+    i = b + 1;
+    j = mj + 1;
+    k = tk + 1;
+  }
+
+  // Blocks from different documents: keep a blank line between them.
+  const text = out
+    .map((s, n) => (n < out.length - 1 && !s.text.endsWith("\n\n") ? s.text.trimEnd() + "\n\n" : s.text))
+    .join("");
+  const endsWithNewline = [mine, theirs].some((d) => d.endsWith("\n"));
+  return { text: endsWithNewline && text && !text.endsWith("\n") ? text + "\n" : text, conflicts };
+}

@@ -18,6 +18,7 @@
   import LibrarySearch from "$lib/components/LibrarySearch.svelte";
   import HistoryPanel from "$lib/components/HistoryPanel.svelte";
   import HighlightsPanel from "$lib/components/HighlightsPanel.svelte";
+  import ConflictDialog from "$lib/components/ConflictDialog.svelte";
   import McpSetupDialog from "$lib/components/McpSetupDialog.svelte";
   import ImagePreview from "$lib/components/ImagePreview.svelte";
   import ZoomViewer from "$lib/components/ZoomViewer.svelte";
@@ -228,6 +229,8 @@
 </script>
 
 <svelte:window onkeydown={handleKeydown} onmouseup={onMouseUp} />
+
+<ConflictDialog />
 
 <div class="print-root flex h-screen flex-col overflow-hidden">
   <Toolbar />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { END, baselineAfterEdit, diffBlocks } from "$lib/changes";
+import { END, baselineAfterEdit, diffBlocks, merge3 } from "$lib/changes";
 
 const doc = (...blocks: string[]) => blocks.join("\n\n") + "\n";
 
@@ -60,5 +60,47 @@ describe("baselineAfterEdit", () => {
     expect(diffBlocks(baselineAfterEdit(mine, changes), mine)?.removedBefore.get("B")).toEqual([
       "Gone",
     ]);
+  });
+});
+
+describe("merge3", () => {
+  const base = doc("# Plan", "Intro paragraph.", "Phase one.", "Phase two.", "Risks.");
+
+  it("merges edits to different paragraphs from both sides", () => {
+    const mine = doc("# Plan", "Intro paragraph, revised by me.", "Phase one.", "Phase two.", "Risks.");
+    const theirs = doc("# Plan", "Intro paragraph.", "Phase one.", "Phase two, expanded by the agent.", "Risks.", "Agent appendix.");
+    const m = merge3(base, mine, theirs);
+    expect(m.conflicts).toEqual([]);
+    expect(m.text).toBe(
+      doc("# Plan", "Intro paragraph, revised by me.", "Phase one.", "Phase two, expanded by the agent.", "Risks.", "Agent appendix."),
+    );
+  });
+
+  it("flags the same paragraph changed differently, keeping theirs in the text", () => {
+    const mine = doc("# Plan", "Intro paragraph.", "Phase one, my way.", "Phase two.", "Risks.");
+    const theirs = doc("# Plan", "Intro paragraph.", "Phase one, agent's way.", "Phase two.", "Risks.");
+    const m = merge3(base, mine, theirs);
+    expect(m.conflicts).toEqual([{ base: "Phase one.", mine: "Phase one, my way.", theirs: "Phase one, agent's way." }]);
+    expect(m.text).toBe(theirs);
+  });
+
+  it("accepts identical changes and one-sided deletions", () => {
+    const mine = doc("# Plan", "Intro paragraph.", "Phase one.", "Phase two.", "Risks!");
+    const theirs = doc("# Plan", "Phase one.", "Phase two.", "Risks!");
+    const m = merge3(base, mine, theirs);
+    expect(m.conflicts).toEqual([]);
+    expect(m.text).toBe(doc("# Plan", "Phase one.", "Phase two.", "Risks!"));
+  });
+
+  it("keeps theirs' exact spacing where nothing was merged", () => {
+    const theirs = "# Plan\n\n\nIntro paragraph.\n\nPhase one.\n\nPhase two.\n\nRisks.\n";
+    expect(merge3(base, base, theirs)).toEqual({ text: theirs, conflicts: [] });
+  });
+
+  it("never glues blocks from different sides together", () => {
+    const b = "A\n\nB";
+    const mine = "A\n\nB\n\nMine at the end";
+    const theirs = "A changed\n\nB";
+    expect(merge3(b, mine, theirs).text).toBe("A changed\n\nB\n\nMine at the end");
   });
 });

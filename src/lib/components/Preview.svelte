@@ -24,7 +24,7 @@
   import { COLOR_KEYS, HIGHLIGHT_COLORS, readableText, type HighlightColor } from "$lib/highlights";
   import HighlightPopover from "./HighlightPopover.svelte";
   import Eraser from "@lucide/svelte/icons/eraser";
-  import { htmlToMarkdown } from "$lib/richedit";
+  import { htmlToMarkdown, spliceEdit } from "$lib/richedit";
   import { invoke } from "@tauri-apps/api/core";
   import { EditorView as CmEditorView, keymap as cmKeymap, drawSelection } from "@codemirror/view";
   import { StateEffect } from "@codemirror/state";
@@ -476,6 +476,9 @@
 
   // --- in-place block editing (reading mode) --------------------------------
   let blockEditing = $state(false);
+  $effect(() => {
+    app.editingInPlace = blockEditing;
+  });
   let blockMap = new Map<Element, SourceBlock>();
 
   /** Keep other blocks' source offsets valid after an edit changes lengths. */
@@ -544,13 +547,20 @@
   }
 
   function stripMdSyntax(s: string): string {
-    return s
+    // Line by line: a heading's text is kept whole, so "## 1. Results"
+    // doesn't lose its "1." to the list-marker rule below.
+    const lines = s.split("\n").map((line) => {
+      const heading = line.match(/^\s{0,3}#{1,6}\s+(.*)$/);
+      if (heading) return heading[1];
+      return line
+        .replace(/^\s{0,3}>\s?/, "")
+        .replace(/^\s*([-*+]|\d+[.)])\s+\[[ xX]\]\s+/, "")
+        .replace(/^\s*([-*+]|\d+[.)])\s+/, "");
+    });
+    return lines
+      .join("\n")
       .replace(/^(`{3,}|~{3,}).*$/gm, "")
       .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/^\s{0,3}#{1,6}\s+/gm, "")
-      .replace(/^\s{0,3}>\s?/gm, "")
-      .replace(/^\s*([-*+]|\d+[.)])\s+\[[ xX]\]\s+/gm, "")
-      .replace(/^\s*([-*+]|\d+[.)])\s+/gm, "")
       .replace(/[*_~`|]/g, "");
   }
 
@@ -580,7 +590,7 @@
     }
   }
 
-  /** A plain click on a mapped block starts editing it in place. */
+  /** A double-click on a mapped block starts editing it in place. */
   function maybeStartBlockEdit(e: MouseEvent): boolean {
     healStuckSession();
     if (app.viewMode !== "preview" || blockEditing || !container) return false;
@@ -686,6 +696,9 @@
         if (typeof point === "object") {
           const range = document.caretRangeFromPoint(point.x, point.y);
           if (range && wrapper.contains(range.startContainer)) {
+            // Opened by a double-click: select the word, as double-clicking
+            // text does, so typing replaces it.
+            if (caret instanceof MouseEvent && caret.detail >= 2) expandToWord(range);
             sel?.removeAllRanges();
             sel?.addRange(range);
             return;
@@ -702,11 +715,23 @@
     });
   }
 
-  /**
-   * Editor-style keyboard behavior on a static selection: selecting text and
-   * pressing Backspace/Delete (or typing) enters edit mode on that block,
-   * restores the selection, and applies the key.
-   */
+  /** Widen a collapsed range in a text node to the word around it. */
+  function expandToWord(range: Range) {
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return;
+    const text = node.nodeValue ?? "";
+    const isWord = (c: string) => /[\p{L}\p{N}_'’-]/u.test(c);
+    let from = range.startOffset;
+    let to = range.startOffset;
+    while (from > 0 && isWord(text[from - 1])) from--;
+    while (to < text.length && isWord(text[to])) to++;
+    if (from < to) {
+      range.setStart(node, from);
+      range.setEnd(node, to);
+    }
+  }
+
+  /** Reading-pane keys: highlighting, closing popovers and edit sessions. */
   function onGlobalKeydown(e: KeyboardEvent) {
     if (e.key === "Escape" && hlPop) {
       hlPop = null;
@@ -738,58 +763,11 @@
       healStuckSession();
       return;
     }
-    if (blockEditing) return;
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
-    const isDelete = e.key === "Backspace" || e.key === "Delete";
-    if (!isDelete && e.key.length !== 1) return;
-    const active = document.activeElement as HTMLElement | null;
-    if (
-      active instanceof HTMLInputElement ||
-      active instanceof HTMLTextAreaElement ||
-      active?.isContentEditable
-    ) {
-      return;
-    }
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
-    const range = sel.getRangeAt(0);
-    if (!container.contains(range.commonAncestorContainer)) return;
-    let el: HTMLElement | null =
-      range.commonAncestorContainer instanceof HTMLElement
-        ? range.commonAncestorContainer
-        : range.commonAncestorContainer.parentElement;
-    while (el && el.parentElement !== container) el = el.parentElement;
-    if (!el) return;
-    const block = blockMap.get(el);
-    if (!block || el.tagName === "PRE" || el.querySelector("pre, .katex, sup a")) return;
-
-    e.preventDefault();
-    const saved = {
-      sc: range.startContainer,
-      so: range.startOffset,
-      ec: range.endContainer,
-      eo: range.endOffset,
-    };
-    const key = e.key;
-    startRichBlockEdit(el, block, "start");
-    // Runs after startRichBlockEdit's own rAF placed its default caret.
-    requestAnimationFrame(() => {
-      try {
-        const r = document.createRange();
-        r.setStart(saved.sc, saved.so);
-        r.setEnd(saved.ec, saved.eo);
-        const s = window.getSelection();
-        s?.removeAllRanges();
-        s?.addRange(r);
-      } catch {
-        return; // selection nodes gone; leave caret as placed
-      }
-      if (isDelete) document.execCommand("delete");
-      else document.execCommand("insertText", false, key);
-    });
+    // Reading is read-only: keys never start an edit (a stray Space over a
+    // selection used to replace it). Editing starts with a double-click.
   }
 
-  /** Clicking the gap between blocks starts a fresh paragraph there. */
+  /** Double-clicking the gap between blocks starts a fresh paragraph there. */
   function maybeStartGapEdit(e: MouseEvent): boolean {
     healStuckSession();
     if (app.viewMode !== "preview" || blockEditing || !container || app.isMermaidDoc) return false;
@@ -888,10 +866,19 @@
       return restored;
     }
     const original = app.content.slice(block.start, block.end);
-    if (md && md !== original.trim()) {
-      shiftBlocks(block.end, md.length - (block.end - block.start));
-      if (restored) blockMap.set(restored, { start: block.start, end: block.start + md.length });
-      app.content = app.content.slice(0, block.start) + md + app.content.slice(block.end);
+    // What the block converts to unedited: the conversion is not faithful, so
+    // comparing against the source would see changes nobody made.
+    const unedited = html === richOriginalHtml ? md : htmlToMarkdown(richOriginalHtml).trim();
+    if (md && md !== unedited) {
+      // Splice just the edited span into the source; rewrite the block only
+      // when that span can't be placed.
+      const updated = spliceEdit(original.trim(), unedited, md) ?? md;
+      const lead = original.length - original.trimStart().length;
+      const trail = original.length - original.trimEnd().length;
+      const next = original.slice(0, lead) + updated + original.slice(original.length - trail);
+      shiftBlocks(block.end, next.length - (block.end - block.start));
+      if (restored) blockMap.set(restored, { start: block.start, end: block.start + next.length });
+      app.content = app.content.slice(0, block.start) + next + app.content.slice(block.end);
       app.scheduleAutosave();
     } else if (restored) {
       blockMap.set(restored, block);
@@ -1381,6 +1368,18 @@
       openMediaViewer(media);
       return;
     }
+  }
+
+  /** Double-click: edit the block (or the gap between blocks) in place. A
+   *  single click never edits, so reading can't change a document. */
+  function handleDblClick(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    if (target.closest("mark.hl, mark.comment-hl, a, img, .mermaid-block, .link-preview, .highlight-popover"))
+      return;
+    selAction = null;
+    // The double-click selected a word; edit from a caret instead.
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) sel.collapseToStart();
     if (maybeStartBlockEdit(event)) return;
     maybeStartGapEdit(event);
   }
@@ -1447,6 +1446,7 @@
   bind:this={scroller}
   class="print-scroll relative h-full cursor-text overflow-y-auto px-8 py-10"
   onclick={handleClick}
+  ondblclick={handleDblClick}
   onscroll={onScroll}
   onmouseup={onMouseUp}
   onmouseover={onHover}
