@@ -1282,6 +1282,7 @@
 
 <svelte:window onkeydown={onGlobalKeydown} />
 
+<div class="print-root relative h-full">
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_mouse_events_have_key_events -->
 <div
   bind:this={scroller}
@@ -1295,81 +1296,6 @@
     if (linkAnchor) hideLinkCard();
   }}
 >
-  <!-- Zero-height sticky strip: the progress bar and resume pill ride along
-       at the top of the pane without shifting the document. -->
-  <div class="no-print pointer-events-none sticky top-0 z-20 -mx-8 -mt-10 mb-10 h-0">
-    {#if !app.isMermaidDoc}
-      <div
-        class="absolute inset-x-0 top-0 h-0.5 origin-left bg-primary/50 transition-transform duration-150"
-        style="transform: scaleX({progress})"
-      ></div>
-    {/if}
-    {#if app.changes}
-      <div class="absolute inset-x-0 top-3 flex justify-center">
-        <div
-          class="pointer-events-auto flex items-center gap-1 rounded-full border bg-popover py-1 pr-1 pl-3 text-xs shadow-md"
-        >
-          <span class="chg-dot mr-1 size-2 rounded-full"></span>
-          <span class="mr-1">
-            {#if changeEls.length}
-              {changeEls.length} {changeEls.length === 1 ? "change" : "changes"} since you last read
-            {:else}
-              Changed since you last read
-            {/if}
-          </span>
-          {#if changeEls.length}
-            <button
-              class="flex size-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              title="Previous change"
-              onclick={(e) => {
-                e.stopPropagation();
-                gotoChange(-1);
-              }}
-            >
-              <ChevronUp class="size-3.5" />
-            </button>
-            <button
-              class="flex size-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              title="Next change"
-              onclick={(e) => {
-                e.stopPropagation();
-                gotoChange(1);
-              }}
-            >
-              <ChevronDown class="size-3.5" />
-            </button>
-          {/if}
-          <button
-            class="rounded-full px-2 py-0.5 font-medium transition-colors hover:bg-accent"
-            onclick={(e) => {
-              e.stopPropagation();
-              app.markAsRead();
-            }}
-          >
-            Mark as read
-          </button>
-        </div>
-      </div>
-    {/if}
-    {#if resumed}
-      <div class="absolute inset-x-0 flex justify-center {app.changes ? 'top-13' : 'top-3'}">
-        <div
-          class="pointer-events-auto flex items-center gap-2 rounded-full border bg-popover py-1 pr-1 pl-3 text-xs shadow-md"
-        >
-          <span class="text-muted-foreground">Resumed where you left off</span>
-          <button
-            class="rounded-full px-2 py-0.5 font-medium transition-colors hover:bg-accent"
-            onclick={(e) => {
-              e.stopPropagation();
-              backToTop();
-            }}
-          >
-            Back to top
-          </button>
-        </div>
-      </div>
-    {/if}
-  </div>
   <!-- Room for the changes banner, so it never covers the title. -->
   <div class="prose-doc" class:has-banner={!!app.changes} bind:this={container}>
     <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized via DOMPurify -->
@@ -1453,4 +1379,81 @@
       {/each}
     </div>
   {/if}
+</div>
+  <!-- Pinned to the pane's top edge, outside the scroller: the progress bar,
+       changes banner and resume pill float over the document. (Not sticky
+       inside the scroller: WebKit sticks below its padding, mid-text.) -->
+  <div class="no-print pointer-events-none absolute inset-x-0 top-0 z-20 h-0">
+    {#if !app.isMermaidDoc}
+      <div
+        class="absolute inset-x-0 top-0 h-0.5 origin-left bg-primary/50 transition-transform duration-150"
+        style="transform: scaleX({progress})"
+      ></div>
+    {/if}
+    {#if app.changes}
+      <div class="absolute inset-x-0 top-3 flex justify-center">
+        <div
+          class="pointer-events-auto flex items-center gap-1 rounded-full border bg-popover py-1 pr-1 pl-3 text-xs shadow-md"
+        >
+          <span class="chg-dot mr-1 size-2 rounded-full"></span>
+          <span class="mr-1">
+            {#if changeEls.length}
+              {changeEls.length} {changeEls.length === 1 ? "change" : "changes"} since you last read
+            {:else}
+              Changed since you last read
+            {/if}
+          </span>
+          {#if changeEls.length}
+            <button
+              class="flex size-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              title="Previous change"
+              onclick={(e) => {
+                e.stopPropagation();
+                gotoChange(-1);
+              }}
+            >
+              <ChevronUp class="size-3.5" />
+            </button>
+            <button
+              class="flex size-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              title="Next change"
+              onclick={(e) => {
+                e.stopPropagation();
+                gotoChange(1);
+              }}
+            >
+              <ChevronDown class="size-3.5" />
+            </button>
+          {/if}
+          <button
+            class="rounded-full px-2 py-0.5 font-medium transition-colors hover:bg-accent"
+            onclick={(e) => {
+              e.stopPropagation();
+              app.markAsRead();
+            }}
+          >
+            Mark as read
+          </button>
+        </div>
+      </div>
+    {/if}
+    {#if resumed}
+      <div class="absolute inset-x-0 flex justify-center {app.changes ? 'top-13' : 'top-3'}">
+        <div
+          class="pointer-events-auto flex items-center gap-2 rounded-full border bg-popover py-1 pr-1 pl-3 text-xs shadow-md"
+        >
+          <span class="text-muted-foreground">Resumed where you left off</span>
+          <button
+            class="rounded-full px-2 py-0.5 font-medium transition-colors hover:bg-accent"
+            onclick={(e) => {
+              e.stopPropagation();
+              backToTop();
+            }}
+          >
+            Back to top
+          </button>
+        </div>
+      </div>
+    {/if}
+  </div>
 </div>
