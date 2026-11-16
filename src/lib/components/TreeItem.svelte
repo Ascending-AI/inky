@@ -89,7 +89,7 @@
         class="flex w-full items-center gap-1.5 rounded-md px-2 py-1 pr-7 text-left text-sm transition-colors
           {isActive ? 'bg-accent text-accent-foreground font-medium' : 'hover:bg-accent/60'}
           {dropHover ? 'ring-2 ring-ring ring-inset bg-accent/40' : ''}"
-        style="padding-left: {8 + depth * 14}px"
+        style="padding-left: {8 + depth * 14}px; {node.hidden ? 'opacity: 0.5' : ''}"
         onclick={activate}
         title={node.name}
       >
@@ -136,6 +136,11 @@
           {/if}
           <DropdownMenu.Item onclick={() => onrequestrename(node)}>Rename…</DropdownMenu.Item>
           <DropdownMenu.Item onclick={revealInFinder}>Reveal in Finder</DropdownMenu.Item>
+          {#if node.hidden}
+            <DropdownMenu.Item onclick={() => app.unhidePath(node.path)}>Unhide</DropdownMenu.Item>
+          {:else}
+            <DropdownMenu.Item onclick={() => app.hidePath(node.path)}>Hide from Inky</DropdownMenu.Item>
+          {/if}
           <DropdownMenu.Separator />
           <DropdownMenu.Item variant="destructive" onclick={() => onrequestdelete(node)}>
             Move to Trash
@@ -155,6 +160,11 @@
     {/if}
     <ContextMenu.Item onclick={() => onrequestrename(node)}>Rename…</ContextMenu.Item>
     <ContextMenu.Item onclick={revealInFinder}>Reveal in Finder</ContextMenu.Item>
+    {#if node.hidden}
+      <ContextMenu.Item onclick={() => app.unhidePath(node.path)}>Unhide</ContextMenu.Item>
+    {:else}
+      <ContextMenu.Item onclick={() => app.hidePath(node.path)}>Hide from Inky</ContextMenu.Item>
+    {/if}
     <ContextMenu.Separator />
     <ContextMenu.Item variant="destructive" onclick={() => onrequestdelete(node)}>
       Move to Trash

@@ -106,7 +106,7 @@
 </script>
 
 {#snippet folderItems(nodes: TreeNode[])}
-  {#each nodes as node (node.path)}
+  {#each nodes.filter((n) => !n.hidden) as node (node.path)}
     {#if node.isDir}
       <DropdownMenu.Sub>
         <DropdownMenu.SubTrigger>

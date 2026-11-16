@@ -2,6 +2,7 @@
 //! No Tauri types: this module also runs in `Inky --mcp` (stdio) mode where
 //! there is no app handle.
 
+use crate::ignores::{self, Ignores, IGNORE_FILE};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -69,12 +70,17 @@ pub fn is_watch_relevant(root: &Path, path: &Path) -> bool {
         return true;
     };
     let name = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let parent = rel.parent().unwrap_or(Path::new(""));
     if name.starts_with('.') && name.ends_with(".comments.json") {
-        return !is_skipped_path(rel.parent().unwrap_or(Path::new("")));
+        return !is_skipped_path(parent) && !ignores::is_hidden(root, path);
+    }
+    // Editing hide rules changes what the sidebar shows.
+    if name == IGNORE_FILE {
+        return !is_skipped_path(parent);
     }
     // A path that no longer exists and has no extension was most likely a folder.
     let folder = path.is_dir() || (!path.exists() && path.extension().is_none());
-    (is_doc(path) || is_image(path) || folder) && !is_skipped_path(rel)
+    (is_doc(path) || is_image(path) || folder) && !is_skipped_path(rel) && !ignores::is_hidden(root, path)
 }
 
 /// A directory entry the tree/walk should not descend into or list.
@@ -94,6 +100,9 @@ pub struct Node {
     pub path: String,
     pub is_dir: bool,
     pub children: Vec<Node>,
+    /// Hidden by an `.inkyignore` rule (only listed when showing hidden items).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,9 +182,19 @@ struct Sidecar {
 
 // --- free helpers ------------------------------------------------------------
 
-/// `prune_empty`: drop folders with no documents anywhere below (workspaces;
-/// the library keeps empty folders the user created).
-fn build_tree(dir: &Path, prune_empty: bool) -> Vec<Node> {
+/// How to list a tree.
+#[derive(Clone, Copy)]
+struct TreeOpts {
+    /// Drop folders with no documents anywhere below (workspaces; the
+    /// library keeps empty folders the user created).
+    prune_empty: bool,
+    /// List `.inkyignore`d items too, flagged `hidden`.
+    show_hidden: bool,
+}
+
+/// `rules`: the `.inkyignore` rules in force inside `dir`; `in_hidden`: `dir`
+/// itself is hidden (so is everything below it).
+fn build_tree(dir: &Path, opts: TreeOpts, rules: &Ignores, in_hidden: bool) -> Vec<Node> {
     let mut nodes: Vec<Node> = Vec::new();
     let Ok(entries) = fs::read_dir(dir) else {
         return nodes;
@@ -186,10 +205,15 @@ fn build_tree(dir: &Path, prune_empty: bool) -> Vec<Node> {
         if skip_entry(&entry, &name) {
             continue;
         }
-        if path.is_dir() {
-            let children = build_tree(&path, prune_empty);
+        let is_dir = path.is_dir();
+        let hidden = in_hidden || rules.hides(&path, is_dir);
+        if hidden && !opts.show_hidden {
+            continue;
+        }
+        if is_dir {
+            let children = build_tree(&path, opts, &rules.enter(&path), hidden);
             // Empty attachment folders are noise.
-            if children.is_empty() && (prune_empty || name.eq_ignore_ascii_case("assets")) {
+            if children.is_empty() && (opts.prune_empty || name.eq_ignore_ascii_case("assets")) {
                 continue;
             }
             nodes.push(Node {
@@ -197,6 +221,7 @@ fn build_tree(dir: &Path, prune_empty: bool) -> Vec<Node> {
                 path: path.to_string_lossy().into_owned(),
                 is_dir: true,
                 children,
+                hidden,
             });
         } else if is_doc(&path) || is_image(&path) {
             nodes.push(Node {
@@ -204,6 +229,7 @@ fn build_tree(dir: &Path, prune_empty: bool) -> Vec<Node> {
                 path: path.to_string_lossy().into_owned(),
                 is_dir: false,
                 children: Vec::new(),
+                hidden,
             });
         }
     }
@@ -215,7 +241,8 @@ fn build_tree(dir: &Path, prune_empty: bool) -> Vec<Node> {
     nodes
 }
 
-fn walk_into(dir: &Path, root: &Path, out: &mut Vec<Entry>) {
+/// Every visible folder and document below `dir` (`.inkyignore`d ones skipped).
+fn walk_into(dir: &Path, root: &Path, rules: &Ignores, out: &mut Vec<Entry>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -227,10 +254,14 @@ fn walk_into(dir: &Path, root: &Path, out: &mut Vec<Entry>) {
             continue;
         }
         let path = entry.path();
+        let is_dir = path.is_dir();
+        if rules.hides(&path, is_dir) {
+            continue;
+        }
         let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().into_owned();
-        if path.is_dir() {
+        if is_dir {
             out.push(Entry { rel: format!("{rel}/"), kind: EntryKind::Folder });
-            walk_into(&path, root, out);
+            walk_into(&path, root, &rules.enter(&path), out);
         } else if is_doc(&path) {
             let kind = if name.to_lowercase().ends_with(".mmd") {
                 EntryKind::Mermaid
@@ -523,14 +554,49 @@ impl Library {
     // --- documents ---
 
     pub fn tree(&self) -> Vec<Node> {
-        build_tree(&self.root, !self.sidecars)
+        self.tree_with(false)
     }
 
-    /// Flat, sorted listing of every folder and document (relative paths).
+    /// The tree, optionally including `.inkyignore`d items (flagged `hidden`).
+    pub fn tree_with(&self, show_hidden: bool) -> Vec<Node> {
+        let opts = TreeOpts { prune_empty: !self.sidecars, show_hidden };
+        build_tree(&self.root, opts, &Ignores::default().enter(&self.root), false)
+    }
+
+    /// Flat, sorted listing of every visible folder and document (relative
+    /// paths; `.inkyignore`d ones are left out).
     pub fn walk(&self) -> Vec<Entry> {
         let mut out = Vec::new();
-        walk_into(&self.root, &self.root, &mut out);
+        walk_into(&self.root, &self.root, &Ignores::default().enter(&self.root), &mut out);
         out
+    }
+
+    // --- hiding (.inkyignore) ---
+
+    /// Hide a file or folder via a rule in the root's `.inkyignore`.
+    pub fn hide(&self, path: &str) -> Result<(), String> {
+        let p = self.resolve(path)?;
+        let rel = p.strip_prefix(&self.root).map_err(|_| "cannot hide the root")?;
+        if rel.as_os_str().is_empty() {
+            return Err("cannot hide the root".into());
+        }
+        ignores::add_rule(&self.root, &ignores::rule_for_path(rel, p.is_dir()))
+    }
+
+    /// Show a hidden file or folder again. Only rules Inky added (exact
+    /// paths in the root's `.inkyignore`) can be removed here; anything else
+    /// names the rule and file so the user can edit it.
+    pub fn unhide(&self, path: &str) -> Result<(), String> {
+        let p = self.resolve(path)?;
+        let rel = p.strip_prefix(&self.root).map_err(|_| "not in this folder")?;
+        ignores::remove_rule(&self.root, &ignores::rule_for_path(rel, p.is_dir()))?;
+        match ignores::hidden_by(&self.root, &p) {
+            None => Ok(()),
+            Some((file, rule)) => {
+                let shown = file.strip_prefix(&self.root).unwrap_or(&file).to_string_lossy().into_owned();
+                Err(format!("Hidden by the rule \"{rule}\" in {shown}"))
+            }
+        }
     }
 
     pub fn read(&self, path: &str) -> Result<String, String> {
@@ -1138,6 +1204,53 @@ mod tests {
         assert!(!r(".git/.a.md.comments.json"));
         assert!(!r("real/notes.txt"));
         assert!(r("real/photo.PNG"), "images show in the tree");
+    }
+
+    #[test]
+    fn inkyignore_hides_from_tree_walk_search_and_watcher() {
+        let (_d, lib) = temp_lib();
+        lib.write("Notes/a.md", "needle").unwrap();
+        lib.write("Notes/vendor_src/b.md", "needle").unwrap();
+        lib.write("Notes/out.generated.md", "needle").unwrap();
+        fs::write(lib.root().join(IGNORE_FILE), "vendor_src/\n*.generated.md\n").unwrap();
+
+        let names = |nodes: &[Node]| nodes.iter().map(|n| n.name.clone()).collect::<Vec<_>>();
+        let notes = lib.tree().into_iter().find(|n| n.name == "Notes").unwrap();
+        assert_eq!(names(&notes.children), ["a.md"]);
+
+        // Showing hidden items lists them, flagged, with their contents.
+        let notes = lib.tree_with(true).into_iter().find(|n| n.name == "Notes").unwrap();
+        let vendor = notes.children.iter().find(|n| n.name == "vendor_src").unwrap();
+        assert!(vendor.hidden && vendor.children[0].hidden);
+        assert!(!notes.children.iter().find(|n| n.name == "a.md").unwrap().hidden);
+
+        let rels: Vec<_> = lib.walk().into_iter().map(|e| e.rel).collect();
+        assert_eq!(rels, ["Notes/", "Notes/a.md"]);
+        let hits: Vec<_> = lib.search("needle").into_iter().map(|h| h.name).collect();
+        assert_eq!(hits, ["a.md"]);
+
+        let root = lib.root();
+        assert!(!is_watch_relevant(root, &root.join("Notes/vendor_src/b.md")));
+        assert!(is_watch_relevant(root, &root.join("Notes/a.md")));
+        assert!(is_watch_relevant(root, &root.join(IGNORE_FILE)), "rule edits refresh the sidebar");
+        assert!(lib.read("Notes/vendor_src/b.md").is_ok(), "hidden files still open directly");
+    }
+
+    #[test]
+    fn hide_and_unhide_round_trip() {
+        let (_d, lib) = temp_lib();
+        lib.write("Research/lab/x.md", "").unwrap();
+        lib.write("Research/keep.md", "").unwrap();
+        lib.hide("Research/lab").unwrap();
+        assert!(lib.walk().iter().all(|e| !e.rel.starts_with("Research/lab")));
+        lib.unhide("Research/lab").unwrap();
+        assert!(lib.walk().iter().any(|e| e.rel == "Research/lab/x.md"));
+        assert!(lib.hide("").is_err(), "the root can't be hidden");
+
+        // A folder hidden by the user's own pattern names that rule.
+        fs::write(lib.root().join(IGNORE_FILE), "lab/\n").unwrap();
+        let err = lib.unhide("Research/lab").unwrap_err();
+        assert!(err.contains("\"lab/\"") && err.contains(IGNORE_FILE), "{err}");
     }
 
     #[test]

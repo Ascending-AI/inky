@@ -13,6 +13,8 @@
   import Plus from "@lucide/svelte/icons/plus";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
+  import Eye from "@lucide/svelte/icons/eye";
+  import EyeOff from "@lucide/svelte/icons/eye-off";
 
   let renameTarget = $state<TreeNode | null>(null);
   let deleteTarget = $state<TreeNode | null>(null);
@@ -66,26 +68,38 @@
     {:else}
       <span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Library</span>
     {/if}
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger>
-        {#snippet child({ props })}
-          <Button {...props} variant="ghost" size="icon" class="size-6" title="New…">
-            <Plus class="size-4" />
-          </Button>
-        {/snippet}
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="end" class="w-52">
-        <DropdownMenu.Item onclick={() => app.newDoc()}>
-          <FilePlus class="size-4" /> New document
-        </DropdownMenu.Item>
-        <DropdownMenu.Item onclick={() => app.newDoc(undefined, "mermaid")}>
-          <Workflow class="size-4" /> New Mermaid diagram
-        </DropdownMenu.Item>
-        <DropdownMenu.Item onclick={() => (newFolderDir = app.activeRoot)}>
-          <FolderPlus class="size-4" /> New folder
-        </DropdownMenu.Item>
-      </DropdownMenu.Content>
-    </DropdownMenu.Root>
+    <div class="flex shrink-0 items-center">
+      <Button
+        variant="ghost"
+        size="icon"
+        class="size-6 {app.showHidden ? 'text-foreground' : 'text-muted-foreground'}"
+        title={app.showHidden ? "Hide hidden items" : "Show hidden items (.inkyignore)"}
+        aria-pressed={app.showHidden}
+        onclick={() => app.toggleShowHidden()}
+      >
+        {#if app.showHidden}<Eye class="size-3.5" />{:else}<EyeOff class="size-3.5" />{/if}
+      </Button>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger>
+          {#snippet child({ props })}
+            <Button {...props} variant="ghost" size="icon" class="size-6" title="New…">
+              <Plus class="size-4" />
+            </Button>
+          {/snippet}
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end" class="w-52">
+          <DropdownMenu.Item onclick={() => app.newDoc()}>
+            <FilePlus class="size-4" /> New document
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onclick={() => app.newDoc(undefined, "mermaid")}>
+            <Workflow class="size-4" /> New Mermaid diagram
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onclick={() => (newFolderDir = app.activeRoot)}>
+            <FolderPlus class="size-4" /> New folder
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
+    </div>
   </div>
 
   <!-- svelte-ignore a11y_no_static_element_interactions -->

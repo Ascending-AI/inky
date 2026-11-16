@@ -3,6 +3,8 @@ export interface TreeNode {
   path: string;
   isDir: boolean;
   children: TreeNode[];
+  /** Hidden by an `.inkyignore` rule; only listed while showing hidden items. */
+  hidden?: boolean;
 }
 
 export type ThemeName = "light" | "dark" | "book";

@@ -78,6 +78,8 @@ class AppState {
   homeDir = $state("");
   recentDocs = $state<string[]>([]);
   tree = $state<TreeNode[]>([]);
+  /** List `.inkyignore`d items in the sidebar (dimmed). */
+  showHidden = $state(false);
   currentPath = $state<string | null>(null);
   /** What changed in the open document since the reader last read it. */
   changes = $state<ChangeSet | null>(null);
@@ -164,6 +166,7 @@ class AppState {
     const prefix = this.activeRoot.length + 1;
     const walk = (nodes: TreeNode[]) => {
       for (const n of nodes) {
+        if (n.hidden) continue;
         if (n.isDir) walk(n.children);
         else if (!isImagePath(n.path))
           out.push({ name: n.name, path: n.path, rel: n.path.slice(prefix) });
@@ -204,6 +207,7 @@ class AppState {
     this.tocVisible = localStorage.getItem("inky.tocVisible") === "true";
     this.syncScroll = localStorage.getItem("inky.syncScroll") !== "false";
     this.sidebarVisible = localStorage.getItem("inky.sidebar") !== "false";
+    this.showHidden = localStorage.getItem("inky.showHidden") === "true";
     this.applyTheme();
     this.applyReadingPrefs();
 
@@ -648,12 +652,53 @@ class AppState {
 
   async refreshTree() {
     try {
-      this.tree = await invoke<TreeNode[]>("list_tree");
+      this.tree = await invoke<TreeNode[]>("list_tree", { showHidden: this.showHidden });
       // An image deleted or moved away (in the app or on disk) leaves the preview.
       if (this.imagePath && !this.imageSiblings.includes(this.imagePath)) this.imagePath = null;
     } catch (e) {
       toast.error(`Could not read library: ${e}`);
     }
+  }
+
+  toggleShowHidden() {
+    this.showHidden = !this.showHidden;
+    localStorage.setItem("inky.showHidden", String(this.showHidden));
+    this.refreshTree();
+  }
+
+  /** Hide a file or folder from Inky via `.inkyignore` (undoable). */
+  async hidePath(path: string) {
+    const name = path.split("/").pop() ?? path;
+    try {
+      await invoke("hide_path", { path });
+      await this.refreshTree();
+      toast.success(`Hid ${name}`, {
+        description: this.showHidden
+          ? "Shown dimmed while hidden items are visible."
+          : "Show it again with the eye button in the sidebar.",
+        action: { label: "Undo", onClick: () => this.unhidePath(path) },
+      });
+    } catch (e) {
+      toast.error(`Could not hide ${name}: ${e}`);
+    }
+  }
+
+  async unhidePath(path: string) {
+    try {
+      await invoke("unhide_path", { path });
+    } catch (e) {
+      // Hidden by a pattern the user wrote; say which, and where.
+      toast.error(String(e), {
+        action: {
+          label: "Show rules file",
+          onClick: async () => {
+            const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
+            revealItemInDir(`${this.activeRoot}/.inkyignore`).catch(() => {});
+          },
+        },
+      });
+    }
+    await this.refreshTree();
   }
 
   async syncFromDisk() {

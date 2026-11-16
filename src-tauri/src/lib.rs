@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 pub mod baselines;
+pub mod ignores;
 pub mod library;
 pub mod mcp;
 pub mod opens;
@@ -218,8 +219,18 @@ fn set_library_root(app: tauri::AppHandle, path: String) -> Result<String, Strin
 }
 
 #[tauri::command]
-fn list_tree(app: tauri::AppHandle) -> Result<Vec<Node>, String> {
-    Ok(active_library(&app)?.tree())
+fn list_tree(app: tauri::AppHandle, show_hidden: Option<bool>) -> Result<Vec<Node>, String> {
+    Ok(active_library(&app)?.tree_with(show_hidden.unwrap_or(false)))
+}
+
+#[tauri::command]
+fn hide_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    active_library(&app)?.hide(&path)
+}
+
+#[tauri::command]
+fn unhide_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    active_library(&app)?.unhide(&path)
 }
 
 #[tauri::command]
@@ -1016,7 +1027,9 @@ pub fn run() {
             purge_delete,
             read_baseline,
             write_baseline,
-            move_baseline
+            move_baseline,
+            hide_path,
+            unhide_path
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
