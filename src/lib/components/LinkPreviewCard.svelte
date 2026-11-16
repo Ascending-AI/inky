@@ -7,6 +7,11 @@
     /** External address, shown instead of content. */
     url?: string;
     hint: string;
+    /** What clicking the card opens (null: clicking just closes it). */
+    open: string | null;
+    /** Links and cited paths inside the card open individually (only for
+     *  content from this document, whose relative links resolve here). */
+    innerLinks: boolean;
     x: number;
     y: number;
     /** Open upward (the link sits near the bottom of the pane). */
@@ -22,7 +27,7 @@
     preview: LinkPreview;
     onenter: () => void;
     onleave: () => void;
-    onopen: () => void;
+    onopen: (href: string | null) => void;
   }
   let { preview, onenter, onleave, onopen }: Props = $props();
 
@@ -39,7 +44,9 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div
-  class="link-preview no-print absolute z-30 w-[22rem] cursor-pointer overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg"
+  class="link-preview no-print absolute z-30 w-[22rem] overflow-hidden {preview.open
+    ? 'cursor-pointer'
+    : ''} rounded-lg border bg-popover text-popover-foreground shadow-lg"
   style="left: {preview.x}px; top: {preview.y}px; {preview.above ? 'transform: translateY(-100%)' : ''}"
   transition:fade={{ duration: 100 }}
   onmouseenter={onenter}
@@ -48,7 +55,10 @@
   onclick={(e) => {
     e.stopPropagation();
     e.preventDefault();
-    onopen();
+    const inner = preview.innerLinks
+      ? (e.target as HTMLElement).closest<HTMLElement>("a[href], [data-open-href]")
+      : null;
+    onopen(inner ? (inner.getAttribute("href") ?? inner.dataset.openHref ?? null) : preview.open);
   }}
 >
   <div class="truncate border-b px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
@@ -66,5 +76,7 @@
       {@html preview.html}
     </div>
   {/if}
-  <div class="border-t px-3 py-1 text-[10px] text-muted-foreground/80">{preview.hint}</div>
+  {#if preview.hint}
+    <div class="truncate border-t px-3 py-1 text-[10px] text-muted-foreground/80">{preview.hint}</div>
+  {/if}
 </div>

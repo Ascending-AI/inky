@@ -755,6 +755,17 @@
   border: none;
   padding: 0;
 }
+/* File paths a footnote cites: clickable like links. */
+.prose-doc.link-preview-body code.open-path {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, var(--prose-link) 45%, transparent);
+  text-underline-offset: 3px;
+  word-break: break-all;
+}
+.prose-doc.link-preview-body code.open-path:hover {
+  color: var(--prose-link);
+}
 .prose-doc.link-preview-body img {
   max-height: 9rem;
   width: auto;

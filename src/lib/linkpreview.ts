@@ -6,7 +6,8 @@
  */
 
 export type LinkTarget =
-  | { kind: "footnote"; label: string; html: string }
+  /** `open`: what the footnote cites (its first link, or a file path in code). */
+  | { kind: "footnote"; label: string; html: string; open: string | null }
   | { kind: "section"; label: string; html: string }
   | { kind: "doc"; href: string; fragment: string | null }
   | { kind: "external"; url: string };
@@ -17,6 +18,47 @@ const MAX_CHARS = 700;
 
 function isHeading(el: Element): boolean {
   return /^H[1-6]$/.test(el.tagName);
+}
+
+/** Inline code that is a file path (`/Users/…/notes.md`, `../a.md`). */
+const PATH_RE = /^(\/|\.\.?\/)[^\n]*[^\s/]$/;
+
+/**
+ * Make what a footnote cites openable: file paths written as inline code
+ * get `data-open-href`; returns the first link or path (the card's target).
+ */
+function markCitations(root: Element): string | null {
+  let first: string | null = null;
+  for (const el of root.querySelectorAll("a[href], code")) {
+    let href: string | null = null;
+    if (el.tagName === "A") {
+      if (!el.hasAttribute("data-footnote-backref")) href = el.getAttribute("href");
+    } else if (!el.closest("a, pre")) {
+      const text = el.textContent?.trim() ?? "";
+      if (PATH_RE.test(text)) {
+        href = text;
+        el.setAttribute("data-open-href", text);
+        el.classList.add("open-path");
+      }
+    }
+    if (href && !first) first = href;
+  }
+  return first;
+}
+
+/** Short name for "Click to open …": a host for web links, a file name for paths. */
+export function targetName(href: string): string {
+  try {
+    if (/^https?:/i.test(href)) return new URL(href).hostname.replace(/^www\./, "");
+  } catch {
+    // Not a URL after all; fall through.
+  }
+  const name = href.split("#")[0].split("/").pop() || href;
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name; // A literal "%" in a file name.
+  }
 }
 
 function stripForPreview(root: Element) {
@@ -64,7 +106,13 @@ export function linkTarget(anchor: HTMLAnchorElement, page: HTMLElement): LinkTa
     if (anchor.hasAttribute("data-footnote-ref") || target.matches("section.footnotes li")) {
       const li = target.cloneNode(true) as Element;
       stripForPreview(li);
-      return { kind: "footnote", label: `Footnote ${anchor.textContent?.trim() ?? ""}`, html: li.innerHTML };
+      const open = markCitations(li);
+      return {
+        kind: "footnote",
+        label: `Footnote ${anchor.textContent?.trim() ?? ""}`,
+        html: li.innerHTML,
+        open,
+      };
     }
     return {
       kind: "section",

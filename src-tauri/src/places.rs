@@ -481,6 +481,21 @@ mod tests {
     }
 
     #[test]
+    fn follow_link_opens_an_absolute_path_cited_in_the_document() {
+        // Footnotes cite sources as `/abs/path/notes.md` in inline code.
+        let f = fixture();
+        fs::write(f.outside.join("Source notes.md"), "S").unwrap();
+        let cited = s(&f.outside.join("Source notes.md"));
+        fs::write(f.library.root().join("plan.md"), format!("Plan.[^1]\n\n[^1]: `{cited}`")).unwrap();
+        let mut places = Places::default();
+        let from = s(&f.library.root().join("plan.md"));
+        let t = places.follow_link(&f.library, &from, &cited).unwrap();
+        assert!(t.doc);
+        assert_eq!(t.path, cited);
+        assert!(places.find(&f.library, &t.path).is_ok(), "the cited document is granted");
+    }
+
+    #[test]
     fn follow_link_accepts_rendered_encoding_of_angle_bracket_links() {
         // `[x](<../dir/My Notes.md>)` renders as href="../dir/My%20Notes.md".
         let f = fixture();

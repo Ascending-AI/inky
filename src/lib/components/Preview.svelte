@@ -35,7 +35,7 @@
   import MessageSquarePlus from "@lucide/svelte/icons/message-square-plus";
   import CommentHoverCard from "./CommentHoverCard.svelte";
   import { capturePosition, getPosition, savePosition, targetScrollTop } from "$lib/readpos";
-  import { linkTarget, openingHtml } from "$lib/linkpreview";
+  import { linkTarget, openingHtml, targetName } from "$lib/linkpreview";
   import { END as CHANGES_END } from "$lib/changes";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -205,11 +205,12 @@
     const rect = el.getBoundingClientRect();
     const srect = scroller.getBoundingClientRect();
     linkAnchor = null;
-    linkHref = "";
     linkCard = {
       label: "Since you last read",
       html: tpl.innerHTML,
       hint: "Click to close",
+      open: null,
+      innerLinks: false,
       x: Math.max(8, Math.min(rect.left - srect.left, srect.width - 360)),
       y: rect.top - srect.top + scroller.scrollTop + 4,
       above: false,
@@ -919,7 +920,6 @@
   let linkCard = $state<LinkPreview | null>(null);
   /** The link the pointer is over (or whose card is showing). */
   let linkAnchor: HTMLAnchorElement | null = null;
-  let linkHref = "";
   let linkShowTimer: ReturnType<typeof setTimeout> | null = null;
   let linkHideTimer: ReturnType<typeof setTimeout> | null = null;
   /** Rendered openings of linked documents, by resolved path. */
@@ -977,26 +977,39 @@
       linkCard = null;
       return;
     }
-    let content: Pick<LinkPreview, "label" | "html" | "url" | "hint">;
+    const href = anchor.getAttribute("href") ?? "";
+    let content: Pick<LinkPreview, "label" | "html" | "url" | "hint" | "open" | "innerLinks">;
     if (t.kind === "external") {
-      content = { label: "External link", html: "", url: t.url, hint: "Click to open in your browser" };
+      content = {
+        label: "External link",
+        html: "",
+        url: t.url,
+        hint: "Click to open in your browser",
+        open: href,
+        innerLinks: false,
+      };
     } else if (t.kind === "doc") {
       const opening = await docOpening(t.href, t.fragment);
       if (!opening || anchor !== linkAnchor) return;
-      content = { label: opening.label, html: opening.html, hint: "Click to open" };
-    } else {
+      content = { label: opening.label, html: opening.html, hint: "Click to open", open: href, innerLinks: false };
+    } else if (t.kind === "footnote") {
+      // The card already shows the footnote; clicking opens what it cites.
       if (!t.html.trim()) return;
       content = {
         label: t.label,
         html: t.html,
-        hint: t.kind === "footnote" ? "Click to jump to the footnote" : "Click to jump there",
+        hint: t.open ? `Click to open ${targetName(t.open)}` : "",
+        open: t.open,
+        innerLinks: true,
       };
+    } else {
+      if (!t.html.trim()) return;
+      content = { label: t.label, html: t.html, hint: "Click to jump there", open: href, innerLinks: true };
     }
     const rect = anchor.getBoundingClientRect();
     const srect = scroller.getBoundingClientRect();
     const width = Math.min(352, srect.width - 16);
     const above = srect.bottom - rect.bottom < 300 && rect.top - srect.top > 300;
-    linkHref = anchor.getAttribute("href") ?? "";
     linkCard = {
       ...content,
       x: Math.max(8, Math.min(rect.left - srect.left, srect.width - width - 8)),
@@ -1380,8 +1393,7 @@
       preview={linkCard}
       onenter={cancelLinkHide}
       onleave={() => hideLinkCard()}
-      onopen={() => {
-        const href = linkHref;
+      onopen={(href) => {
         hideLinkCard(0);
         if (href) handleLink(href);
       }}

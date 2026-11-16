@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { linkTarget, openingHtml } from "$lib/linkpreview";
+import { linkTarget, openingHtml, targetName } from "$lib/linkpreview";
 
 function page(html: string): HTMLElement {
   const el = document.createElement("div");
@@ -59,5 +59,42 @@ describe("openingHtml", () => {
   it("starts at the fragment when it exists, else at the top", () => {
     expect(openingHtml(DOC, "third")).toContain("Not part of second.");
     expect(openingHtml(DOC, "missing")).toContain("Title");
+  });
+});
+
+describe("footnote citations", () => {
+  it("opens the footnote's first link, not the footnote", () => {
+    const p = page(`<p><sup><a href="#fn-1" data-footnote-ref>1</a></sup></p>
+      <section class="footnotes"><ol><li id="fn-1"><p>See <a href="https://example.com/x">x</a>
+      and <code>/Users/me/notes.md</code>. <a href="#ref" data-footnote-backref>↩</a></p></li></ol></section>`);
+    const t = linkTarget(p.querySelector("a[data-footnote-ref]")!, p);
+    expect(t?.kind === "footnote" && t.open).toBe("https://example.com/x");
+  });
+
+  it("falls back to a file path written as inline code, and marks it openable", () => {
+    const p = page(`<p><sup><a href="#fn-2" data-footnote-ref>2</a></sup></p>
+      <section class="footnotes"><ol><li id="fn-2"><p><strong>Metron core</strong> [Internal].
+      <code>/Users/me/Veritas/research notes/metron_core.md</code> <code>not a path</code></p></li></ol></section>`);
+    const t = linkTarget(p.querySelector("a[data-footnote-ref]")!, p);
+    if (t?.kind !== "footnote") throw new Error("expected a footnote");
+    expect(t.open).toBe("/Users/me/Veritas/research notes/metron_core.md");
+    expect(t.html).toContain('data-open-href="/Users/me/Veritas/research notes/metron_core.md"');
+    expect(t.html.match(/data-open-href/g)).toHaveLength(1);
+  });
+
+  it("has nothing to open when the footnote cites nothing", () => {
+    const p = page(`<p><sup><a href="#fn-3" data-footnote-ref>3</a></sup></p>
+      <section class="footnotes"><ol><li id="fn-3"><p>Just a remark.</p></li></ol></section>`);
+    const t = linkTarget(p.querySelector("a[data-footnote-ref]")!, p);
+    expect(t?.kind === "footnote" && t.open).toBeNull();
+  });
+});
+
+describe("targetName", () => {
+  it("names web links by host and paths by file name", () => {
+    expect(targetName("https://www.example.com/a/b")).toBe("example.com");
+    expect(targetName("/Users/me/metron_core.md")).toBe("metron_core.md");
+    expect(targetName("Other%20doc.md#part")).toBe("Other doc.md");
+    expect(targetName("/x/100%.md")).toBe("100%.md");
   });
 });
