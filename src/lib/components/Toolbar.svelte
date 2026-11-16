@@ -29,7 +29,8 @@
   import Folder from "@lucide/svelte/icons/folder";
   import FileText from "@lucide/svelte/icons/file-text";
   import type { TreeNode, ViewMode } from "$lib/types";
-  import { breadcrumbs, type Crumb } from "$lib/paths";
+  import { breadcrumbs, isImagePath, type Crumb } from "$lib/paths";
+  import ImageIcon from "@lucide/svelte/icons/image";
 
   /** Folder trail to the open document; each folder lists its contents. */
   const crumbs = $derived(
@@ -106,6 +107,14 @@
           {@render folderItems(node.children)}
         </DropdownMenu.SubContent>
       </DropdownMenu.Sub>
+    {:else if isImagePath(node.path)}
+      <DropdownMenu.Item
+        class={node.path === app.imagePath ? "font-medium" : ""}
+        onclick={() => app.openImage(node.path)}
+      >
+        <ImageIcon class="size-4 opacity-60" />
+        <span class="truncate">{node.name}</span>
+      </DropdownMenu.Item>
     {:else}
       <DropdownMenu.Item
         class={node.path === app.currentPath ? "font-medium" : ""}

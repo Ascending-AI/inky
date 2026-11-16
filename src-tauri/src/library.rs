@@ -7,6 +7,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const DOC_EXTENSIONS: [&str; 3] = ["md", "markdown", "mmd"];
+/// Images listed in the sidebar tree (previewed, not edited).
+pub const IMAGE_EXTENSIONS: [&str; 9] = ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "heic"];
 pub const APP_IDENTIFIER: &str = "com.inky.app";
 pub const HISTORY_DIR: &str = ".inky-history";
 pub const SNAPSHOT_MIN_INTERVAL_SECS: u64 = 10 * 60;
@@ -39,6 +41,13 @@ pub fn is_doc(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+pub fn is_image(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| IMAGE_EXTENSIONS.contains(&e.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
 /// Folders never shown, searched or watched: build output, dependencies,
 /// virtualenvs. Hidden entries are skipped too.
 pub const SKIP_DIRS: [&str; 7] = ["node_modules", "target", "dist", "build", "__pycache__", ".venv", "venv"];
@@ -53,7 +62,7 @@ pub fn is_skipped_path(rel: &Path) -> bool {
 }
 
 /// Should a file-system event at `path` (under the watched `root`) refresh
-/// the frontend? Documents, folders and comment sidecars — not anything in
+/// the frontend? Documents, images, folders and comment sidecars — not anything in
 /// hidden or skipped folders.
 pub fn is_watch_relevant(root: &Path, path: &Path) -> bool {
     let Ok(rel) = path.strip_prefix(root) else {
@@ -65,7 +74,7 @@ pub fn is_watch_relevant(root: &Path, path: &Path) -> bool {
     }
     // A path that no longer exists and has no extension was most likely a folder.
     let folder = path.is_dir() || (!path.exists() && path.extension().is_none());
-    (is_doc(path) || folder) && !is_skipped_path(rel)
+    (is_doc(path) || is_image(path) || folder) && !is_skipped_path(rel)
 }
 
 /// A directory entry the tree/walk should not descend into or list.
@@ -179,7 +188,7 @@ fn build_tree(dir: &Path, prune_empty: bool) -> Vec<Node> {
         }
         if path.is_dir() {
             let children = build_tree(&path, prune_empty);
-            // Image-attachment folders with no documents inside are noise.
+            // Empty attachment folders are noise.
             if children.is_empty() && (prune_empty || name.eq_ignore_ascii_case("assets")) {
                 continue;
             }
@@ -189,7 +198,7 @@ fn build_tree(dir: &Path, prune_empty: bool) -> Vec<Node> {
                 is_dir: true,
                 children,
             });
-        } else if is_doc(&path) {
+        } else if is_doc(&path) || is_image(&path) {
             nodes.push(Node {
                 name,
                 path: path.to_string_lossy().into_owned(),
@@ -1128,6 +1137,20 @@ mod tests {
         assert!(!r(".inky-history/a.md"));
         assert!(!r(".git/.a.md.comments.json"));
         assert!(!r("real/notes.txt"));
+        assert!(r("real/photo.PNG"), "images show in the tree");
+    }
+
+    #[test]
+    fn tree_lists_images_but_not_other_files() {
+        let (_d, lib) = temp_lib();
+        lib.write("a.md", "").unwrap();
+        fs::write(lib.root().join("shot.png"), b"png").unwrap();
+        fs::write(lib.root().join("notes.txt"), b"txt").unwrap();
+        fs::create_dir(lib.root().join("assets")).unwrap();
+        fs::write(lib.root().join("assets/diagram.svg"), b"<svg/>").unwrap();
+        let names: Vec<_> = lib.tree().iter().map(|n| n.name.clone()).collect();
+        assert_eq!(names, ["assets", "a.md", "shot.png"]);
+        assert!(lib.walk().iter().all(|e| !e.rel.ends_with(".png")), "walk stays documents-only");
     }
 
     #[test]

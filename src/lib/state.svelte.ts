@@ -11,7 +11,7 @@ import { EditorView } from "@codemirror/view";
 import type { OpenRequest, ThemeName, TreeNode, ViewMode } from "./types";
 import { WELCOME_DOC, MERMAID_TEMPLATE } from "./templates";
 import { extractToc, type TocEntry } from "./markdown";
-import { isInside } from "./paths";
+import { isImagePath, isInside, remapPath } from "./paths";
 import { lockSync } from "./scrollsync";
 import { newId, type CommentThread } from "./comments";
 import {
@@ -69,6 +69,8 @@ class AppState {
   recentDocs = $state<string[]>([]);
   tree = $state<TreeNode[]>([]);
   currentPath = $state<string | null>(null);
+  /** Image shown in the preview overlay (over the open document), if any. */
+  imagePath = $state<string | null>(null);
   content = $state("");
   savedContent = $state("");
   theme = $state<ThemeName>("light");
@@ -141,11 +143,28 @@ class AppState {
     const walk = (nodes: TreeNode[]) => {
       for (const n of nodes) {
         if (n.isDir) walk(n.children);
-        else out.push({ name: n.name, path: n.path, rel: n.path.slice(prefix) });
+        else if (!isImagePath(n.path))
+          out.push({ name: n.name, path: n.path, rel: n.path.slice(prefix) });
       }
     };
     walk(this.tree);
     return out;
+  });
+  /** Images in the previewed image's folder, in tree order (for ← / →). */
+  imageSiblings = $derived.by(() => {
+    const target = this.imagePath;
+    if (!target) return [];
+    const dir = target.slice(0, target.lastIndexOf("/"));
+    const find = (nodes: TreeNode[]): TreeNode[] | null => {
+      for (const n of nodes) {
+        if (!n.isDir) continue;
+        if (n.path === dir) return n.children;
+        if (dir.startsWith(n.path + "/")) return find(n.children);
+      }
+      return null;
+    };
+    const nodes = dir === this.activeRoot ? this.tree : (find(this.tree) ?? []);
+    return nodes.filter((n) => !n.isDir && isImagePath(n.path)).map((n) => n.path);
   });
 
   #autosaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -565,6 +584,7 @@ class AppState {
     try {
       const newPath = await invoke<string>("move_path", { path, targetDir });
       renamePath(this.nav, path, newPath);
+      if (this.imagePath) this.imagePath = remapPath(this.imagePath, path, newPath);
       if (this.currentPath === path) {
         this.currentPath = newPath;
         localStorage.setItem("inky.lastDoc", newPath);
@@ -581,6 +601,8 @@ class AppState {
   async refreshTree() {
     try {
       this.tree = await invoke<TreeNode[]>("list_tree");
+      // An image deleted or moved away (in the app or on disk) leaves the preview.
+      if (this.imagePath && !this.imageSiblings.includes(this.imagePath)) this.imagePath = null;
     } catch (e) {
       toast.error(`Could not read library: ${e}`);
     }
@@ -666,6 +688,7 @@ class AppState {
       // Preview, so the editor is scrolled directly below.
       this.pendingScroll = this.viewMode === "editor" ? null : (opts.restoreScroll ?? null);
       this.#clearConflict();
+      this.imagePath = null;
       this.currentPath = path;
       this.content = text;
       this.savedContent = text;
@@ -689,6 +712,16 @@ class AppState {
       if (!opts.silent) toast.error(`Could not open document: ${e}`);
       return false;
     }
+  }
+
+  /** Preview an image over the current document (the document stays open). */
+  async openImage(path: string) {
+    if (this.dirty) await this.save();
+    this.imagePath = path;
+  }
+
+  closeImage() {
+    this.imagePath = null;
   }
 
   async goBack() {
@@ -833,6 +866,7 @@ class AppState {
     try {
       const newPath = await invoke<string>("rename_path", { path, newName });
       renamePath(this.nav, path, newPath);
+      if (this.imagePath) this.imagePath = remapPath(this.imagePath, path, newPath);
       if (this.currentPath === path) {
         this.currentPath = newPath;
         localStorage.setItem("inky.lastDoc", newPath);

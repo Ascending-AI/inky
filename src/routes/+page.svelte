@@ -18,6 +18,7 @@
   import LibrarySearch from "$lib/components/LibrarySearch.svelte";
   import HistoryPanel from "$lib/components/HistoryPanel.svelte";
   import McpSetupDialog from "$lib/components/McpSetupDialog.svelte";
+  import ImagePreview from "$lib/components/ImagePreview.svelte";
   import * as Resizable from "$lib/components/ui/resizable/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import FilePlus from "@lucide/svelte/icons/file-plus-2";
@@ -255,6 +256,9 @@
 
     <main class="print-root relative min-w-0 flex-1">
       <SearchBar />
+      {#if app.imagePath}
+        <ImagePreview />
+      {/if}
       {#if !ready}
         <div class="flex h-full items-center justify-center text-muted-foreground">Loading…</div>
       {:else if !app.currentPath}

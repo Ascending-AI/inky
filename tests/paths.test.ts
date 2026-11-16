@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { breadcrumbs, displayDir, isInside } from "$lib/paths";
+import { breadcrumbs, displayDir, isImagePath, isInside, remapPath } from "$lib/paths";
 
 describe("isInside", () => {
   it("matches the root itself and its descendants only", () => {
@@ -48,5 +48,23 @@ describe("breadcrumbs", () => {
     expect(breadcrumbs("/Users/me/repo/docs/README.md", roots)).toEqual([
       { label: "~/repo/docs", dir: "/Users/me/repo/docs", browsable: false },
     ]);
+  });
+});
+
+describe("isImagePath", () => {
+  it("matches image extensions in any case", () => {
+    expect(isImagePath("/a/shot.PNG")).toBe(true);
+    expect(isImagePath("/a/photo.jpeg")).toBe(true);
+    expect(isImagePath("/a/diagram.svg")).toBe(true);
+    expect(isImagePath("/a/notes.md")).toBe(false);
+    expect(isImagePath("/a/png")).toBe(false);
+  });
+});
+
+describe("remapPath", () => {
+  it("follows a renamed file or folder", () => {
+    expect(remapPath("/a/x.png", "/a/x.png", "/a/y.png")).toBe("/a/y.png");
+    expect(remapPath("/a/img/x.png", "/a/img", "/b/img")).toBe("/b/img/x.png");
+    expect(remapPath("/a/imgs/x.png", "/a/img", "/b/img")).toBe("/a/imgs/x.png");
   });
 });

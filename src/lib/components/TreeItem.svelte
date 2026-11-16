@@ -9,6 +9,8 @@
   import Folder from "@lucide/svelte/icons/folder";
   import FileText from "@lucide/svelte/icons/file-text";
   import Workflow from "@lucide/svelte/icons/workflow";
+  import ImageIcon from "@lucide/svelte/icons/image";
+  import { isImagePath } from "$lib/paths";
   import TreeItem from "./TreeItem.svelte";
 
   interface Props {
@@ -24,7 +26,10 @@
   let expanded = $state(depth === 0);
   let dropHover = $state(false);
   let menuOpen = $state(false);
-  const isActive = $derived(app.currentPath === node.path);
+  const isImage = $derived(!node.isDir && isImagePath(node.path));
+  const isActive = $derived(
+    app.imagePath ? app.imagePath === node.path : app.currentPath === node.path,
+  );
   const isMermaid = $derived(node.name.toLowerCase().endsWith(".mmd"));
 
   const DRAG_TYPE = "application/x-inky-path";
@@ -32,6 +37,8 @@
   function activate() {
     if (node.isDir) {
       expanded = !expanded;
+    } else if (isImage) {
+      app.openImage(node.path);
     } else {
       app.openDoc(node.path);
     }
@@ -91,6 +98,8 @@
             class="size-3.5 shrink-0 transition-transform {expanded ? 'rotate-90' : ''}"
           />
           <Folder class="size-4 shrink-0 opacity-70" />
+        {:else if isImage}
+          <ImageIcon class="ml-[18px] size-4 shrink-0 opacity-70" />
         {:else if isMermaid}
           <Workflow class="ml-[18px] size-4 shrink-0 opacity-70" />
         {:else}

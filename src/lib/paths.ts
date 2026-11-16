@@ -43,3 +43,17 @@ export function breadcrumbs(
   }
   return crumbs;
 }
+
+/** Images the sidebar lists and previews (mirrors `IMAGE_EXTENSIONS` in library.rs). */
+const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|heic)$/i;
+
+export function isImagePath(path: string): boolean {
+  return IMAGE_RE.test(path);
+}
+
+/** `path` after `from` was renamed or moved to `to` (unchanged if unaffected). */
+export function remapPath(path: string, from: string, to: string): string {
+  if (path === from) return to;
+  if (path.startsWith(from + "/")) return to + path.slice(from.length);
+  return path;
+}
