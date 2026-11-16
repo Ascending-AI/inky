@@ -14,6 +14,7 @@ import { extractToc, type TocEntry } from "./markdown";
 import { isImagePath, isInside, remapPath } from "./paths";
 import { capturePosition, forgetPositions, remapPositions, targetScrollTop } from "./readpos";
 import { baselineAfterEdit, diffBlocks, type ChangeSet } from "./changes";
+import type { MediaItem } from "./components/ZoomViewer.svelte";
 import {
   DEFAULT_TYPOGRAPHY,
   loadTypography,
@@ -84,6 +85,10 @@ class AppState {
   #baseline: string | null = null;
   /** Image shown in the preview overlay (over the open document), if any. */
   imagePath = $state<string | null>(null);
+  /** Images and diagrams of the open document, zoomed in the viewer. */
+  mediaView = $state<{ items: MediaItem[]; index: number } | null>(null);
+  /** An image or diagram viewer covers the document. */
+  viewerOpen = $derived(this.imagePath !== null || this.mediaView !== null);
   content = $state("");
   savedContent = $state("");
   theme = $state<ThemeName>("light");
@@ -734,6 +739,7 @@ class AppState {
       this.announceResume = true;
       this.#clearConflict();
       this.imagePath = null;
+      this.mediaView = null;
       if (path !== this.currentPath) {
         this.changes = null;
         this.#baseline = null;
@@ -767,7 +773,17 @@ class AppState {
   /** Preview an image over the current document (the document stays open). */
   async openImage(path: string) {
     if (this.dirty) await this.save();
+    this.mediaView = null;
     this.imagePath = path;
+  }
+
+  openMedia(items: MediaItem[], index: number) {
+    this.imagePath = null;
+    this.mediaView = { items, index };
+  }
+
+  closeMedia() {
+    this.mediaView = null;
   }
 
   closeImage() {

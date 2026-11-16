@@ -19,6 +19,7 @@
   import HistoryPanel from "$lib/components/HistoryPanel.svelte";
   import McpSetupDialog from "$lib/components/McpSetupDialog.svelte";
   import ImagePreview from "$lib/components/ImagePreview.svelte";
+  import ZoomViewer from "$lib/components/ZoomViewer.svelte";
   import * as Resizable from "$lib/components/ui/resizable/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import FilePlus from "@lucide/svelte/icons/file-plus-2";
@@ -135,6 +136,7 @@
 
   function onGestureStart(e: Event) {
     e.preventDefault();
+    if (app.viewerOpen) return;
     pinchBase = app.fontScale;
   }
 
@@ -152,6 +154,7 @@
   function onWheel(e: WheelEvent) {
     if (!e.ctrlKey) return;
     e.preventDefault();
+    if (app.viewerOpen) return;
     if (pinchBase === null) app.setFontScale(pinchScale(app.fontScale, e.deltaY));
   }
 
@@ -258,6 +261,13 @@
       <SearchBar />
       {#if app.imagePath}
         <ImagePreview />
+      {:else if app.mediaView}
+        <ZoomViewer
+          items={app.mediaView.items}
+          index={app.mediaView.index}
+          onindex={(i) => app.mediaView && (app.mediaView.index = i)}
+          onclose={() => app.closeMedia()}
+        />
       {/if}
       {#if !ready}
         <div class="flex h-full items-center justify-center text-muted-foreground">Loading…</div>

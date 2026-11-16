@@ -617,6 +617,15 @@
   }
 }
 
+/* Images and diagrams open in the zoom viewer on click. */
+.prose-doc:not(.link-preview-body) img,
+.prose-doc:not(.link-preview-body) .mermaid-block svg {
+  cursor: zoom-in;
+}
+.prose-doc a img {
+  cursor: pointer;
+}
+
 /* ---------------------------------- */
 /* Changes since last read            */
 /* ---------------------------------- */

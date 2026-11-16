@@ -40,6 +40,7 @@
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import LinkPreviewCard, { type LinkPreview } from "./LinkPreviewCard.svelte";
+  import type { MediaItem } from "./ZoomViewer.svelte";
 
   let container: HTMLDivElement | undefined = $state();
   let scroller: HTMLDivElement | undefined = $state();
@@ -1203,8 +1204,31 @@
       handleLink(anchor.getAttribute("href") ?? "");
       return;
     }
+    const media = (event.target as HTMLElement).closest<Element>("img, .mermaid-block svg");
+    if (media && container?.contains(media) && !media.closest(".rich-edit")) {
+      openMediaViewer(media);
+      return;
+    }
     if (maybeStartBlockEdit(event)) return;
     maybeStartGapEdit(event);
+  }
+
+  /** Zoom the clicked image or diagram; ← / → step through the others. */
+  function openMediaViewer(clicked: Element) {
+    if (!container) return;
+    const els = Array.from(container.querySelectorAll("img, .mermaid-block svg")).filter(
+      (el) => !el.closest(".rich-edit") && !(el.tagName === "IMG" && el.closest("svg")),
+    );
+    let diagrams = 0;
+    const items: MediaItem[] = els.map((el) => {
+      if (el instanceof HTMLImageElement) {
+        const name = decodeURIComponent((el.dataset.mdSrc ?? el.src).split("/").pop() ?? "Image");
+        return { kind: "img", src: el.currentSrc || el.src, title: el.alt || name };
+      }
+      diagrams++;
+      return { kind: "svg", svg: el.outerHTML, title: `Diagram ${diagrams}` };
+    });
+    app.openMedia(items, Math.max(0, els.indexOf(clicked)));
   }
 
   async function handleLink(href: string) {
