@@ -174,6 +174,14 @@ class AppState {
   highlightOrder = $state<Record<string, number>>({});
   /** Colour for the next highlight (the last one used). */
   highlightColor = $state<HighlightColor>("yellow");
+  /** Load remote images in every document (off: a tracking-pixel guard). */
+  loadRemoteImages = $state(false);
+  /** Documents whose remote images the reader loaded this session. */
+  remoteImageDocs = $state<string[]>([]);
+  /** Whether the open document may load remote images. */
+  remoteImagesAllowed = $derived(
+    this.loadRemoteImages || (!!this.currentPath && this.remoteImageDocs.includes(this.currentPath)),
+  );
   /** A highlight the reading pane should scroll to once it is rendered. */
   focusHighlightId = $state<string | null>(null);
   #highlightsSaving: Promise<void> = Promise.resolve();
@@ -254,6 +262,7 @@ class AppState {
     this.syncScroll = localStorage.getItem("inky.syncScroll") !== "false";
     this.sidebarVisible = localStorage.getItem("inky.sidebar") !== "false";
     this.showHidden = localStorage.getItem("inky.showHidden") === "true";
+    this.loadRemoteImages = localStorage.getItem("inky.remoteImages") === "true";
     const storedColor = localStorage.getItem("inky.highlightColor");
     if (isColor(storedColor)) this.highlightColor = storedColor;
     this.highlightStore = parseStore(await invoke<string>("read_highlights").catch(() => ""));
@@ -454,6 +463,18 @@ class AppState {
       localStorage.setItem("inky.fontScale", String(next));
       this.applyReadingPrefs();
     });
+  }
+
+  /** Load the open document's remote images (this session only). */
+  allowRemoteImagesHere() {
+    const path = this.currentPath;
+    if (path && !this.remoteImageDocs.includes(path)) this.remoteImageDocs = [...this.remoteImageDocs, path];
+  }
+
+  setLoadRemoteImages(on: boolean) {
+    this.loadRemoteImages = on;
+    localStorage.setItem("inky.remoteImages", String(on));
+    if (!on) this.remoteImageDocs = [];
   }
 
   setReadingWidth(width: ReadingWidth) {

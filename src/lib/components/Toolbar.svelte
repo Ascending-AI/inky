@@ -431,7 +431,7 @@
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end">
         <DropdownMenu.Item onclick={() => app.copyMarkdown()}>Copy Markdown</DropdownMenu.Item>
-        <DropdownMenu.Item onclick={() => app.copyHtml(renderMarkdown(app.content))}>
+        <DropdownMenu.Item onclick={() => app.copyHtml(renderMarkdown(app.content, { remoteImages: true }))}>
           Copy HTML
         </DropdownMenu.Item>
       </DropdownMenu.Content>
@@ -573,6 +573,24 @@
                 </Button>
               {/each}
             </div>
+          </div>
+          <div class="grid gap-2">
+            <span class="text-xs font-medium text-muted-foreground">Remote images</span>
+            <div class="grid grid-cols-2 gap-1">
+              {#each [{ on: false, label: "Ask first" }, { on: true, label: "Always load" }] as opt (opt.label)}
+                <Button
+                  variant={app.loadRemoteImages === opt.on ? "secondary" : "ghost"}
+                  size="sm"
+                  class="h-7 px-0 text-xs {app.loadRemoteImages === opt.on ? 'font-semibold' : ''}"
+                  onclick={() => app.setLoadRemoteImages(opt.on)}
+                >
+                  {opt.label}
+                </Button>
+              {/each}
+            </div>
+            <p class="text-[11px] text-muted-foreground">
+              Loading an image from the web tells its server you opened the document.
+            </p>
           </div>
           {#if !isDefaultTypography(app.typography)}
             <Button

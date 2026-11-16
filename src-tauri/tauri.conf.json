@@ -24,11 +24,37 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' asset: http://asset.localhost data: blob: https: http:",
+        "media-src": "'self' asset: http://asset.localhost blob:",
+        "font-src": "'self' data:",
+        "connect-src": "'self' ipc: http://ipc.localhost",
+        "worker-src": "'self' blob:",
+        "object-src": "'none'",
+        "frame-src": "'none'",
+        "base-uri": "'none'",
+        "form-action": "'none'"
+      },
       "assetProtocol": {
         "enable": true,
-        "scope": ["$HOME/**"]
-      }
+        "scope": [
+          "$HOME/**/*.[pP][nN][gG]",
+          "$HOME/**/*.[jJ][pP][gG]",
+          "$HOME/**/*.[jJ][pP][eE][gG]",
+          "$HOME/**/*.[gG][iI][fF]",
+          "$HOME/**/*.[wW][eE][bB][pP]",
+          "$HOME/**/*.[sS][vV][gG]",
+          "$HOME/**/*.[aA][vV][iI][fF]",
+          "$HOME/**/*.[bB][mM][pP]",
+          "$HOME/**/*.[hH][eE][iI][cC]"
+        ]
+      },
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ]
     }
   },
   "plugins": {

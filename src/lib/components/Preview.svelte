@@ -5,6 +5,7 @@
   import { toggleTaskMarker } from "$lib/tasks";
   import {
     renderMarkdown,
+    countBlockedRemote,
     renderMermaidBlocks,
     resetMermaidTheme,
     extractBlocks,
@@ -24,6 +25,7 @@
   import { COLOR_KEYS, HIGHLIGHT_COLORS, readableText, type HighlightColor } from "$lib/highlights";
   import HighlightPopover from "./HighlightPopover.svelte";
   import Eraser from "@lucide/svelte/icons/eraser";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import { htmlToMarkdown, spliceEdit } from "$lib/richedit";
   import { invoke } from "@tauri-apps/api/core";
   import { EditorView as CmEditorView, keymap as cmKeymap, drawSelection } from "@codemirror/view";
@@ -60,17 +62,21 @@
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let firstRender = true;
 
-  function toHtml(src: string, isMermaidDoc: boolean): string {
+  function toHtml(src: string, isMermaidDoc: boolean, remoteImages: boolean): string {
     if (isMermaidDoc) {
       return `<div class="mermaid-block" data-mermaid="${encodeURIComponent(src)}"></div>`;
     }
-    return renderMarkdown(src);
+    return renderMarkdown(src, { remoteImages });
   }
+
+  /** Remote images and media the open document holds back (see $lib/markdown). */
+  let blockedRemote = $state(0);
 
   // Debounced re-render while typing; instant on document switch.
   $effect(() => {
     const src = app.content;
     const isMermaid = app.isMermaidDoc;
+    const remote = app.remoteImagesAllowed;
     app.currentPath;
     // Hold re-renders while a block is being edited in place (self-healing:
     // a stuck lock without a live session must never freeze rendering).
@@ -78,12 +84,12 @@
     if (blockEditing) return;
     if (firstRender) {
       firstRender = false;
-      html = toHtml(src, isMermaid);
+      html = toHtml(src, isMermaid, remote);
       return;
     }
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      html = toHtml(src, isMermaid);
+      html = toHtml(src, isMermaid, remote);
     }, 200);
   });
 
@@ -226,6 +232,7 @@
         // Map blocks first so editing works immediately, even while mermaid
         // is still loading/rendering diagrams.
         computeBlockMap();
+        blockedRemote = countBlockedRemote(container);
         await renderMermaidBlocks(container, theme);
         resolveLocalImages();
         applyMarks();
@@ -303,7 +310,7 @@
     const text = app.content.slice(block.start, block.end).trim();
     const parts: string[] = [];
     const section = (title: string, md: string) =>
-      `<p class="chg-card-title">${title}</p>${renderMarkdown(md)}`;
+      `<p class="chg-card-title">${title}</p>${renderMarkdown(md, { remoteImages: app.remoteImagesAllowed })}`;
     const removed = [
       ...(c.removedBefore.get(text) ?? []),
       ...(el.classList.contains("chg-removed-after") ? (c.removedBefore.get(CHANGES_END) ?? []) : []),
@@ -1165,12 +1172,12 @@
         fromDoc: app.currentPath,
         href,
       });
-      const key = `${path}#${fragment ?? ""}`;
+      const key = `${path}#${fragment ?? ""}#${app.loadRemoteImages}`;
       let html = docOpenings.get(key);
       if (html === undefined) {
         const src = await invoke<string>("read_doc", { path });
         const tpl = document.createElement("template");
-        tpl.innerHTML = openingHtml(renderMarkdown(src), fragment);
+        tpl.innerHTML = openingHtml(renderMarkdown(src, { remoteImages: app.loadRemoteImages }), fragment);
         resolveLocalImages(tpl.content, path);
         html = tpl.innerHTML;
         docOpenings.set(key, html);
@@ -1203,7 +1210,7 @@
     resetMermaidTheme();
     // Force re-render of mermaid blocks with the new theme.
     untrack(() => {
-      html = toHtml(app.content, app.isMermaidDoc);
+      html = toHtml(app.content, app.isMermaidDoc, app.remoteImagesAllowed);
     });
   });
 
@@ -1651,4 +1658,30 @@
       </div>
     {/if}
   </div>
+  {#if blockedRemote > 0 && !app.remoteImagesAllowed}
+    <div class="no-print pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center">
+      <div
+        class="pointer-events-auto flex items-center gap-1 rounded-full border bg-popover py-1 pr-1 pl-3 text-xs shadow-md"
+      >
+        <ShieldCheck class="mr-0.5 size-3.5 text-muted-foreground" />
+        <span class="mr-1 text-muted-foreground">
+          {blockedRemote} remote {blockedRemote === 1 ? "image" : "images"} blocked
+        </span>
+        <button
+          class="rounded-full px-2 py-0.5 font-medium transition-colors hover:bg-accent"
+          title="Load this document's remote images until Inky quits"
+          onclick={() => app.allowRemoteImagesHere()}
+        >
+          Load
+        </button>
+        <button
+          class="rounded-full px-2 py-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          title="Always load remote images (change in Reading settings)"
+          onclick={() => app.setLoadRemoteImages(true)}
+        >
+          Always
+        </button>
+      </div>
+    </div>
+  {/if}
 </div>

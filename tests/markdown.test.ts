@@ -153,3 +153,53 @@ describe("inline math", () => {
     expect(renderMarkdown("$$\nx = 1\n$$\n")).toContain("katex-display");
   });
 });
+
+describe("remote content", () => {
+  const md = [
+    "![chart](https://example.com/c.png) ![local](images/a.png) [a link](https://example.com)",
+    "",
+    '<img src="//cdn.example.com/x.gif"><p style="background:url(https://t.example/p.png)">styled</p>',
+    "",
+    '<video poster="https://example.com/p.jpg"></video><svg><image href="https://example.com/s.png"></image></svg>',
+    "",
+    "<style>body { display: none }</style>",
+  ].join("\n");
+
+  const render = (opts?: { remoteImages?: boolean }) => {
+    const box = document.createElement("div");
+    box.innerHTML = renderMarkdown(md, opts);
+    return box;
+  };
+
+  it("blocks remote images and media by default, keeping links and local images", () => {
+    const box = render();
+    const fetching = [...box.querySelectorAll("*")].flatMap((el) =>
+      [...el.attributes]
+        .filter((a) => !a.name.startsWith("data-") && !(el.tagName === "A" && a.name === "href"))
+        .filter((a) => a.value.includes("//"))
+        .map((a) => `${el.tagName}.${a.name}`),
+    );
+    expect(fetching).toEqual([]);
+    expect(box.querySelectorAll("[data-remote-blocked]")).toHaveLength(5);
+    expect(box.querySelector('img[alt="local"]')?.getAttribute("src")).toBe("images/a.png");
+    expect(box.querySelector("a")?.getAttribute("href")).toBe("https://example.com");
+    const chart = box.querySelector('img[alt="chart"]')!;
+    expect(chart.hasAttribute("src")).toBe(false);
+    expect(chart.getAttribute("data-remote-src")).toBe("https://example.com/c.png");
+  });
+
+  it("loads them when allowed", () => {
+    const box = render({ remoteImages: true });
+    expect(box.querySelectorAll("[data-remote-blocked]")).toHaveLength(0);
+    expect(box.querySelector('img[alt="chart"]')?.getAttribute("src")).toBe("https://example.com/c.png");
+  });
+
+  it("never renders <style> (it would restyle the whole app)", () => {
+    expect(render({ remoteImages: true }).querySelector("style")).toBeNull();
+  });
+
+  it("writes a blocked image back unchanged when its paragraph is edited", () => {
+    const p = render().querySelector("p")!;
+    expect(htmlToMarkdown(p.outerHTML)).toContain("![chart](https://example.com/c.png)");
+  });
+});

@@ -591,6 +591,24 @@ fn mcp_status(state: tauri::State<McpServer>) -> bool {
     }
 }
 
+/// The secret agents must send to the HTTP MCP server, created on first use
+/// and kept in the config so agent setups keep working across launches.
+fn mcp_secret(app: &tauri::AppHandle) -> Result<String, String> {
+    let config = read_config(app);
+    if let Some(token) = config.mcp_token.filter(|t| t.len() >= 32) {
+        return Ok(token);
+    }
+    let token = mcp::new_secret()?;
+    write_config(app, &Config { mcp_token: Some(token.clone()), ..read_config(app) })?;
+    Ok(token)
+}
+
+/// For the "Connect an agent" window's commands.
+#[tauri::command]
+fn mcp_token(app: tauri::AppHandle) -> Result<String, String> {
+    mcp_secret(&app)
+}
+
 #[tauri::command]
 async fn start_mcp(
     app: tauri::AppHandle,
@@ -603,7 +621,8 @@ async fn start_mcp(
         }
     }
     let lib = open_library(&app)?;
-    let handle = mcp::serve_http(lib, port).await?;
+    let secret = mcp_secret(&app)?;
+    let handle = mcp::serve_http(lib, port, &secret).await?;
     let url = handle.url();
     if let Some(old) = state.0.lock().unwrap().replace(handle) {
         old.stop();
@@ -1051,6 +1070,7 @@ pub fn run() {
             install_cli,
             start_mcp,
             stop_mcp,
+            mcp_token,
             mcp_status,
             app_binary_path,
             undo_delete,

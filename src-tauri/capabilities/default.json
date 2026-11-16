@@ -16,7 +16,18 @@
     },
     {
       "identifier": "opener:allow-open-path",
-      "allow": [{ "path": "$HOME/**" }]
+      "allow": [
+        { "path": "$HOME/**/*.[pP][dD][fF]" },
+        { "path": "$HOME/**/*.[pP][nN][gG]" },
+        { "path": "$HOME/**/*.[jJ][pP][gG]" },
+        { "path": "$HOME/**/*.[jJ][pP][eE][gG]" },
+        { "path": "$HOME/**/*.[gG][iI][fF]" },
+        { "path": "$HOME/**/*.[wW][eE][bB][pP]" },
+        { "path": "$HOME/**/*.[sS][vV][gG]" },
+        { "path": "$HOME/**/*.[aA][vV][iI][fF]" },
+        { "path": "$HOME/**/*.[bB][mM][pP]" },
+        { "path": "$HOME/**/*.[hH][eE][iI][cC]" }
+      ]
     },
     "dialog:default",
     "clipboard-manager:allow-read-text",

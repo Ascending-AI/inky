@@ -27,6 +27,9 @@ pub struct Config {
     /// Recently opened documents, newest first (see `recents`).
     #[serde(default)]
     pub recent: Vec<String>,
+    /// Secret agents send to the app's HTTP MCP server (see `mcp::serve_http`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_token: Option<String>,
 }
 
 /// `~/Library/Application Support/com.inky.app/config.json` on macOS — the same

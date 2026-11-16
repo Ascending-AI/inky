@@ -223,11 +223,64 @@ marked.use({
   },
 });
 
-export function renderMarkdown(src: string): string {
+export interface RenderOptions {
+  /** Let remote (http/https) images and media load. Off by default: fetching
+   *  them tells their server that the document was opened, when and from
+   *  where (a tracking pixel). */
+  remoteImages?: boolean;
+}
+
+/** Attributes through which an element fetches something when it renders.
+ *  `href` counts everywhere except on links (SVG `<image>`, `<use>`). */
+const FETCHING_ATTRS = ["src", "srcset", "poster", "background", "href", "xlink:href", "style"];
+const REMOTE_URL = /(?:^|[\s,("'])(?:https?:)?\/\//i;
+
+/** Set while sanitizing a render that blocks remote content. */
+let blockingRemote = false;
+
+DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (!blockingRemote || node.nodeType !== 1) return;
+  const el = node as Element;
+  const isLink = el.tagName === "A" || el.tagName === "AREA";
+  let blocked = false;
+  for (const name of FETCHING_ATTRS) {
+    const value = el.getAttribute(name);
+    if (value === null || !REMOTE_URL.test(value)) continue;
+    if (name === "href" && isLink) continue;
+    if (name === "style" && !/url\s*\(/i.test(value)) continue;
+    el.setAttribute(`data-remote-${name.replace(":", "-")}`, value);
+    el.removeAttribute(name);
+    blocked = true;
+  }
+  if (!blocked) return;
+  el.setAttribute("data-remote-blocked", "");
+  // Rich edits write images back from data-md-src (see $lib/richedit).
+  const src = el.getAttribute("data-remote-src");
+  if (el.tagName === "IMG" && src && !el.hasAttribute("data-md-src")) el.setAttribute("data-md-src", src);
+});
+
+/** How many elements a render held back (see RenderOptions.remoteImages). */
+export function countBlockedRemote(root: ParentNode): number {
+  return root.querySelectorAll("[data-remote-blocked]").length;
+}
+
+export function renderMarkdown(src: string, { remoteImages = false }: RenderOptions = {}): string {
   slugCounts = new Map();
   const html = marked.parse(src, { async: false }) as string;
+  blockingRemote = !remoteImages;
+  try {
+    return sanitize(html);
+  } finally {
+    blockingRemote = false;
+  }
+}
+
+function sanitize(html: string): string {
   return DOMPurify.sanitize(html, {
     ADD_ATTR: ["data-mermaid"],
+    // A <style> in a document would restyle the whole app, not just the page
+    // (and could fetch remote fonts and images).
+    FORBID_TAGS: ["style"],
     // Without this, heading ids that collide with document/window properties
     // ("title", "location", "history", …) get stripped as DOM clobbering,
     // silently breaking TOC anchors. We render into a local app view and never

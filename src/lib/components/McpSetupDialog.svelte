@@ -8,10 +8,15 @@
   import { app } from "$lib/state.svelte";
 
   let binary = $state("/Applications/Inky.app/Contents/MacOS/Inky");
+  /** Secret the HTTP server requires (see `mcp::serve_http`). */
+  let token = $state("<token>");
   $effect(() => {
     if (app.mcpSetupOpen) {
       invoke<string>("app_binary_path")
         .then((p) => (binary = p))
+        .catch(() => {});
+      invoke<string>("mcp_token")
+        .then((t) => (token = t))
         .catch(() => {});
     }
   });
@@ -21,7 +26,7 @@
   const snippets = $derived([
     {
       title: "Claude Code (HTTP — needs Inky running with the light on)",
-      code: `claude mcp add --transport http inky ${httpUrl}`,
+      code: `claude mcp add --transport http inky ${httpUrl} --header "Authorization: Bearer ${token}"`,
     },
     {
       title: "Claude Code (stdio — works even when Inky is closed)",
@@ -72,7 +77,9 @@
         </div>
       {/each}
       <p class="text-xs text-muted-foreground">
-        ChatGPT connectors need a public HTTPS URL, so they can't reach a server on your Mac.
+        Other HTTP clients: use <code>{httpUrl}</code> with the header
+        <code>Authorization: Bearer …</code> shown above. The token stays the same between launches;
+        treat it like a password. ChatGPT connectors need a public HTTPS URL, so they can't reach a server on your Mac.
       </p>
     </div>
   </Dialog.Content>

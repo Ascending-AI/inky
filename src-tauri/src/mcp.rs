@@ -690,9 +690,53 @@ impl HttpHandle {
     }
 }
 
+/// A fresh secret for the HTTP server (256 bits from the OS, hex).
+pub fn new_secret() -> Result<String, String> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(|e| format!("cannot generate a secret: {e}"))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Constant-time comparison, so response timing can't reveal the secret.
+fn same_secret(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Only agents holding the secret get in. Any program on the Mac can reach
+/// 127.0.0.1, and web pages can try to; browsers always send `Origin` on
+/// such requests, agents don't, so those are refused outright.
+async fn require_secret(
+    axum::extract::State(secret): axum::extract::State<std::sync::Arc<str>>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::{header, StatusCode};
+    use axum::response::IntoResponse;
+    if req.headers().contains_key(header::ORIGIN) {
+        return (StatusCode::FORBIDDEN, "Browser requests are not allowed").into_response();
+    }
+    let given = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("");
+    if !same_secret(given.trim().as_bytes(), secret.as_bytes()) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "Missing or wrong Inky token: copy the connection command again from Inky's \"Connect an agent\" window",
+        )
+            .into_response();
+    }
+    next.run(req).await
+}
+
 /// Bind `127.0.0.1:port` (0 = any free port) and serve streamable-HTTP MCP at `/mcp`
-/// on the current tokio runtime.
-pub async fn serve_http(lib: Library, port: u16) -> Result<HttpHandle, String> {
+/// on the current tokio runtime. Requests must carry `Authorization: Bearer <secret>`.
+pub async fn serve_http(lib: Library, port: u16, secret: &str) -> Result<HttpHandle, String> {
+    if secret.len() < 32 {
+        return Err("the MCP secret is too short".into());
+    }
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await.map_err(|e| {
         if e.kind() == std::io::ErrorKind::AddrInUse {
             format!("port {port} is already in use — is another Inky (or something else) listening?")
@@ -709,7 +753,9 @@ pub async fn serve_http(lib: Library, port: u16) -> Result<HttpHandle, String> {
             .with_legacy_session_mode(false)
             .with_cancellation_token(token.child_token()),
     );
-    let router = axum::Router::new().nest_service("/mcp", service);
+    let router = axum::Router::new()
+        .nest_service("/mcp", service)
+        .layer(axum::middleware::from_fn_with_state(std::sync::Arc::<str>::from(secret), require_secret));
     let shutdown = token.clone();
     let task = tokio::spawn(async move {
         let _ = axum::serve(listener, router)
@@ -1029,23 +1075,31 @@ mod tests {
         f.server.abort();
     }
 
-    #[tokio::test]
-    async fn http_server_answers_initialize_and_stops() {
+    const SECRET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    /// POST an `initialize` with extra header lines; returns the raw response.
+    async fn post_initialize(addr: SocketAddr, headers: &str) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let dir = tempfile::tempdir().unwrap();
-        let lib = Library::open(dir.path()).unwrap();
-        let handle = serve_http(lib, 0).await.unwrap();
-        assert!(handle.is_running());
-        assert!(handle.url().starts_with("http://127.0.0.1:") && handle.url().ends_with("/mcp"));
         let body = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}"#;
-        let mut stream = tokio::net::TcpStream::connect(handle.addr).await.unwrap();
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
         let req = format!(
-            "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         );
         stream.write_all(req.as_bytes()).await.unwrap();
         let mut response = String::new();
         stream.read_to_string(&mut response).await.unwrap();
+        response
+    }
+
+    #[tokio::test]
+    async fn http_server_answers_initialize_and_stops() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::open(dir.path()).unwrap();
+        let handle = serve_http(lib, 0, SECRET).await.unwrap();
+        assert!(handle.is_running());
+        assert!(handle.url().starts_with("http://127.0.0.1:") && handle.url().ends_with("/mcp"));
+        let response = post_initialize(handle.addr, &format!("Authorization: Bearer {SECRET}\r\n")).await;
         assert!(response.starts_with("HTTP/1.1 200"), "{response}");
         assert!(response.contains("\"name\":\"inky\""), "{response}");
         handle.stop();
@@ -1063,11 +1117,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn http_server_refuses_requests_without_the_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::open(dir.path()).unwrap();
+        let handle = serve_http(lib, 0, SECRET).await.unwrap();
+        let none = post_initialize(handle.addr, "").await;
+        assert!(none.starts_with("HTTP/1.1 401"), "{none}");
+        let wrong = post_initialize(handle.addr, &format!("Authorization: Bearer {}x\r\n", &SECRET[1..])).await;
+        assert!(wrong.starts_with("HTTP/1.1 401"), "{wrong}");
+        // A web page that somehow learned the secret is still refused.
+        let browser = post_initialize(
+            handle.addr,
+            &format!("Authorization: Bearer {SECRET}\r\nOrigin: https://evil.example\r\n"),
+        )
+        .await;
+        assert!(browser.starts_with("HTTP/1.1 403"), "{browser}");
+        handle.stop();
+    }
+
+    #[test]
+    fn secrets_are_long_and_fresh() {
+        let (a, b) = (new_secret().unwrap(), new_secret().unwrap());
+        assert_eq!(a.len(), 64);
+        assert_ne!(a, b);
+        assert!(same_secret(a.as_bytes(), a.clone().as_bytes()));
+        assert!(!same_secret(a.as_bytes(), b.as_bytes()));
+        assert!(!same_secret(a.as_bytes(), &a.as_bytes()[1..]));
+    }
+
+    #[tokio::test]
     async fn http_port_in_use_is_a_clear_error() {
         let dir = tempfile::tempdir().unwrap();
         let lib = Library::open(dir.path()).unwrap();
-        let first = serve_http(lib.clone(), 0).await.unwrap();
-        let err = serve_http(lib, first.addr.port()).await.unwrap_err();
+        let first = serve_http(lib.clone(), 0, SECRET).await.unwrap();
+        let err = serve_http(lib, first.addr.port(), SECRET).await.unwrap_err();
         assert!(err.contains("already in use"), "{err}");
         first.stop();
     }
