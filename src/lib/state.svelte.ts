@@ -971,9 +971,18 @@ class AppState {
     for (let i = 0; i < 20; i++) {
       await new Promise((r) => setTimeout(r, 250));
       if (await invoke<boolean>("path_exists", { path: savePath })) {
-        toast.success(`PDF saved: ${savePath.split("/").pop()}`);
-        const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
-        revealItemInDir(savePath);
+        const { openPath, revealItemInDir } = await import("@tauri-apps/plugin-opener");
+        toast.success(`PDF saved: ${savePath.split("/").pop()}`, {
+          duration: 10000,
+          action: {
+            label: "Open",
+            onClick: () => openPath(savePath).catch((e) => toast.error(`Could not open PDF: ${e}`)),
+          },
+          cancel: {
+            label: "Show in Finder",
+            onClick: () => revealItemInDir(savePath).catch((e) => toast.error(`${e}`)),
+          },
+        });
         return;
       }
     }

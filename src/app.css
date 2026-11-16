@@ -629,22 +629,26 @@
 /* Print (PDF export)                 */
 /* ---------------------------------- */
 
-/* Page margins come from the native print operation (NSPrintInfo); CSS margins
-   on top of that would double up. */
+/* Page margins live here, not in the native print operation: WebKit lets a
+   CSS @page margin override NSPrintInfo's margins, so this is the one place
+   they are set (the native margins are zero). */
 @page {
-  margin: 0;
+  margin: 0.85in 0.75in;
 }
 
 @media print {
-  /* Lay the page out at the paper's content width (~1in margins on A4/Letter
-     come from the native print operation). A fixed physical width means the
-     print engine never has to scale the content down, so type comes out at
-     its natural size no matter the window or app font-scale. */
+  /* A fixed column width, narrower than the printable area on both A4 and
+     Letter, keeps type the same size whatever the window or app font-scale.
+     Auto margins center the column on the page, so the side margins come out
+     even (~0.9in on A4, ~1in on Letter). */
   html,
   body {
     height: auto !important;
-    width: 6.3in !important;
+    width: 6in !important;
     background: white !important;
+  }
+  html {
+    margin: 0 auto !important;
   }
   .no-print {
     display: none !important;
@@ -667,8 +671,8 @@
     padding: 0 !important;
   }
   .prose-doc {
-    width: 6.3in !important;
-    max-width: 6.3in !important;
+    width: 6in !important;
+    max-width: 6in !important;
     margin: 0 !important;
     /* Document-like type, independent of the on-screen reading settings */
     --prose-scale: 1;

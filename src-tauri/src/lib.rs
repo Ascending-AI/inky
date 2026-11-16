@@ -570,14 +570,13 @@ fn print_document(window: tauri::WebviewWindow, save_path: Option<String>) -> Re
 
                 let wk: &objc2_web_kit::WKWebView = &*webview.inner().cast();
                 let print_info = NSPrintInfo::sharedPrintInfo().copy();
-                // The CSS lays content out at 6.3in wide; with these margins the
-                // printable area is wider than that on both A4 and US Letter, so
-                // content is never scaled and horizontal centering yields ~1in
-                // effective side margins. (Points are 1/72 inch.)
-                print_info.setLeftMargin(54.0);
-                print_info.setRightMargin(54.0);
-                print_info.setTopMargin(60.0);
-                print_info.setBottomMargin(60.0);
+                // Page margins come from the CSS @page rule (app.css): WebKit
+                // lets it override these, so zero here keeps a single source and
+                // avoids doubled margins on WebKits that would add both.
+                print_info.setLeftMargin(0.0);
+                print_info.setRightMargin(0.0);
+                print_info.setTopMargin(0.0);
+                print_info.setBottomMargin(0.0);
                 print_info.setHorizontalPagination(NSPrintingPaginationMode::Fit);
                 print_info.setVerticalPagination(NSPrintingPaginationMode::Automatic);
                 print_info.setHorizontallyCentered(true);
