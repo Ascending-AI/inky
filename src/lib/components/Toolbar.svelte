@@ -32,6 +32,7 @@
   import BookOpenText from "@lucide/svelte/icons/book-open-text";
   import Ellipsis from "@lucide/svelte/icons/ellipsis";
   import TableOfContents from "@lucide/svelte/icons/table-of-contents";
+  import Highlighter from "@lucide/svelte/icons/highlighter";
   import MessageSquareText from "@lucide/svelte/icons/message-square-text";
   import History from "@lucide/svelte/icons/history";
   import UnfoldVertical from "@lucide/svelte/icons/unfold-vertical";
@@ -322,6 +323,30 @@
       <Tooltip.Content>
         {app.docSidecars ? "Comments (⌘⇧C)" : "Not available for files outside the library"}
       </Tooltip.Content>
+    </Tooltip.Root>
+
+    <Tooltip.Root>
+      <Tooltip.Trigger>
+        {#snippet child({ props })}
+          <Button
+            {...props}
+            variant="ghost"
+            size="icon"
+            class="relative {app.highlightsVisible ? 'bg-accent' : ''}"
+            onclick={() => app.toggleHighlights()}
+          >
+            <Highlighter class="size-4" />
+            {#if app.docHighlights.length > 0}
+              <span
+                class="absolute -top-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[9px] font-semibold text-primary-foreground tabular-nums"
+              >
+                {app.docHighlights.length > 9 ? "9+" : app.docHighlights.length}
+              </span>
+            {/if}
+          </Button>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content>Highlights</Tooltip.Content>
     </Tooltip.Root>
 
     <Tooltip.Root>

@@ -17,6 +17,7 @@
   import QuickOpen from "$lib/components/QuickOpen.svelte";
   import LibrarySearch from "$lib/components/LibrarySearch.svelte";
   import HistoryPanel from "$lib/components/HistoryPanel.svelte";
+  import HighlightsPanel from "$lib/components/HighlightsPanel.svelte";
   import McpSetupDialog from "$lib/components/McpSetupDialog.svelte";
   import ImagePreview from "$lib/components/ImagePreview.svelte";
   import ZoomViewer from "$lib/components/ZoomViewer.svelte";
@@ -341,6 +342,31 @@
       >
         <div class="absolute inset-y-0 right-0" style="width: {tocWidth}px">
           <TocPanel />
+        </div>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="absolute inset-y-0 -left-[3px] z-10 w-1.5 cursor-col-resize transition-colors hover:bg-ring/50 active:bg-ring/70"
+          onpointerdown={(e) =>
+            startPanelDrag(e, {
+              get: () => tocWidth,
+              set: (w) => (tocWidth = w),
+              sign: -1,
+              min: 200,
+              max: 480,
+              storageKey: "inky.tocWidth",
+            })}
+        ></div>
+      </div>
+    {/if}
+
+    {#if ready && app.highlightsVisible}
+      <div
+        class="no-print relative shrink-0"
+        style="width: {tocWidth}px"
+        transition:slide={{ axis: "x", duration: 220, easing: cubicOut }}
+      >
+        <div class="absolute inset-y-0 right-0" style="width: {tocWidth}px">
+          <HighlightsPanel />
         </div>
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div

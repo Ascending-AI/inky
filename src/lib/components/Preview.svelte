@@ -11,7 +11,9 @@
     type SourceBlock,
   } from "$lib/markdown";
   import { registerScroller } from "$lib/scrollsync";
-  import { wrapQuote, unwrapMarks, contextAround } from "$lib/comments";
+  import { wrapQuote, wrapAnchor, unwrapMarks, contextAround } from "$lib/comments";
+  import { COLOR_KEYS, HIGHLIGHT_COLORS, readableText, type HighlightColor } from "$lib/highlights";
+  import HighlightPopover from "./HighlightPopover.svelte";
   import { htmlToMarkdown } from "$lib/richedit";
   import { invoke } from "@tauri-apps/api/core";
   import { EditorView as CmEditorView, keymap as cmKeymap, drawSelection } from "@codemirror/view";
@@ -90,10 +92,11 @@
     }
   }
 
-  // --- comment highlights --------------------------------------------------
-  function applyCommentHighlights() {
+  // --- comment and reader highlights ---------------------------------------
+  /** Re-wrap comment quotes and reader highlights (both anchor to text). */
+  function applyMarks() {
     if (!container) return;
-    unwrapMarks(container, "mark.comment-hl");
+    unwrapMarks(container, "mark.comment-hl, mark.hl");
     const order: Record<string, number> = {};
     for (const t of app.commentThreads) {
       if (t.resolved) continue;
@@ -101,6 +104,80 @@
       if (idx >= 0) order[t.id] = idx;
     }
     app.threadOrder = order;
+    const hlOrder: Record<string, number> = {};
+    for (const h of app.docHighlights) {
+      let last = true; // segments are wrapped back to front
+      const idx = wrapAnchor(container, h, () => {
+        const mark = document.createElement("mark");
+        mark.className = `hl hl-${h.color}`;
+        mark.dataset.hlId = h.id;
+        if (last && h.note) mark.dataset.note = "";
+        last = false;
+        return mark;
+      });
+      if (idx >= 0) hlOrder[h.id] = idx;
+    }
+    app.highlightOrder = hlOrder;
+  }
+
+  // Highlights added, recoloured, annotated or removed: redraw the marks.
+  $effect(() => {
+    for (const h of app.docHighlights) void (h.color + h.note);
+    if (!container) return;
+    tick().then(() => {
+      if (!blockEditing) applyMarks();
+      tryFocusHighlight();
+    });
+  });
+
+  $effect(() => {
+    if (app.focusHighlightId) tick().then(tryFocusHighlight);
+  });
+
+  /** Scroll to the highlight the panel asked for, once its mark exists. */
+  function tryFocusHighlight() {
+    const id = app.focusHighlightId;
+    if (!id || !container) return;
+    const marks = container.querySelectorAll<HTMLElement>(`mark.hl[data-hl-id="${CSS.escape(id)}"]`);
+    if (!marks.length) return;
+    app.focusHighlightId = null;
+    marks[0].scrollIntoView({ behavior: "smooth", block: "center" });
+    for (const m of marks) {
+      m.classList.remove("hl-flash");
+      void m.offsetWidth;
+      m.classList.add("hl-flash");
+    }
+  }
+
+  // --- highlight popover (click an existing highlight) -----------------------
+  let hlPop = $state<{ id: string; x: number; y: number } | null>(null);
+  const popHighlight = $derived(
+    hlPop ? (app.docHighlights.find((h) => h.id === hlPop!.id) ?? null) : null,
+  );
+
+  function openHighlightPopover(mark: HTMLElement) {
+    if (!scroller || !mark.dataset.hlId) return;
+    const rect = mark.getBoundingClientRect();
+    const srect = scroller.getBoundingClientRect();
+    hlPop = {
+      id: mark.dataset.hlId,
+      x: Math.max(8, Math.min(rect.left - srect.left, srect.width - 264)),
+      y: rect.bottom - srect.top + scroller.scrollTop + 6,
+    };
+  }
+
+  /** Highlight the selected text (from the selection pill or the H key). */
+  function highlightSelection(color: HighlightColor) {
+    if (!selAction) return;
+    const draft = { ...selAction.draft, text: selAction.text };
+    selAction = null;
+    // Capture first: committing an edit session replaces the DOM.
+    if (blockEditing) {
+      if (richWrapper) finishRichEdit(true);
+      else rawFinish?.(true);
+    }
+    app.addHighlight(draft, color);
+    window.getSelection()?.removeAllRanges();
   }
 
   // Mermaid needs a second pass over the real DOM, and a full redo on theme change.
@@ -116,7 +193,7 @@
         computeBlockMap();
         await renderMermaidBlocks(container, theme);
         resolveLocalImages();
-        applyCommentHighlights();
+        applyMarks();
         // Back/forward: return to where the reader was (after diagrams have
         // their final height). Otherwise resume the saved reading position.
         if (app.pendingScroll !== null && scroller) {
@@ -127,6 +204,8 @@
         } else if (!positionSettled) {
           resumeSavedPosition();
         }
+        // A highlight picked in the panel wins over the resumed position.
+        tryFocusHighlight();
       }
     });
   });
@@ -280,14 +359,15 @@
   });
 
   // --- select-to-comment ---------------------------------------------------
-  let selAction = $state<{ x: number; y: number; draft: CommentDraft } | null>(null);
+  let selAction = $state<{ x: number; y: number; draft: CommentDraft; text: string } | null>(
+    null,
+  );
 
   function onMouseUp(e: MouseEvent) {
     if (e.target instanceof HTMLTextAreaElement) return;
     setTimeout(() => {
       const sel = window.getSelection();
       if (
-        !app.docSidecars ||
         app.isMermaidDoc ||
         !sel ||
         sel.isCollapsed ||
@@ -320,9 +400,10 @@
       const rect = range.getBoundingClientRect();
       const srect = scroller.getBoundingClientRect();
       selAction = {
-        x: Math.max(8, Math.min(rect.right - srect.left, srect.width - 130)),
+        x: Math.max(8, Math.min(rect.right - srect.left - 120, srect.width - 290)),
         y: Math.max(4, rect.top - srect.top + scroller.scrollTop - 38),
         draft: { quote, ...contextAround(container, range) },
+        text: readableText(range),
       };
     }, 0);
   }
@@ -452,7 +533,7 @@
     if (app.viewMode !== "preview" || blockEditing || !container) return false;
     const target = e.target as HTMLElement;
     // Leave links, comment highlights, form controls and diagrams alone.
-    if (target.closest("a, mark.comment-hl, input, textarea, svg, .mermaid-block, .rich-edit"))
+    if (target.closest("a, mark.comment-hl, mark.hl, input, textarea, svg, .mermaid-block, .rich-edit"))
       return false;
     if (!window.getSelection()?.isCollapsed) return false;
     let el = target as HTMLElement | null;
@@ -574,6 +655,22 @@
    * restores the selection, and applies the key.
    */
   function onGlobalKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape" && hlPop) {
+      hlPop = null;
+      return;
+    }
+    if (
+      selAction &&
+      (e.key === "h" || e.key === "H") &&
+      !e.metaKey &&
+      !e.ctrlKey &&
+      !e.altKey &&
+      !(e.target as HTMLElement | null)?.closest?.("input, textarea, [contenteditable='true'], .cm-editor")
+    ) {
+      e.preventDefault();
+      highlightSelection(app.highlightColor);
+      return;
+    }
     if (e.key === "Escape" && linkCard) {
       hideLinkCard(0);
       return;
@@ -1203,9 +1300,18 @@
       toggleTask(checkbox);
       return;
     }
+    if (hlPop) {
+      hlPop = null;
+      if ((event.target as HTMLElement).closest("mark.hl")) return;
+    }
     const mark = (event.target as HTMLElement).closest<HTMLElement>("mark.comment-hl");
     if (mark?.dataset.threadId) {
       app.openThread(mark.dataset.threadId);
+      return;
+    }
+    const hlMark = (event.target as HTMLElement).closest<HTMLElement>("mark.hl");
+    if (hlMark && window.getSelection()?.isCollapsed !== false) {
+      openHighlightPopover(hlMark);
       return;
     }
     const anchor = (event.target as HTMLElement).closest("a");
@@ -1302,17 +1408,44 @@
     {@html html}
   </div>
   {#if selAction}
-    <button
-      class="no-print absolute z-20 flex items-center gap-1.5 rounded-full border bg-popover px-3 py-1.5 text-xs font-medium shadow-md transition-colors hover:bg-accent"
+    <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+    <div
+      class="no-print absolute z-20 flex items-center gap-1 rounded-full border bg-popover p-1 shadow-md"
       style="left: {selAction.x}px; top: {selAction.y}px"
       onmousedown={(e) => e.preventDefault()}
-      onclick={(e) => {
-        e.stopPropagation();
-        createComment();
-      }}
+      onclick={(e) => e.stopPropagation()}
     >
-      <MessageSquarePlus class="size-3.5" /> Comment
-    </button>
+      {#each COLOR_KEYS as key (key)}
+        <button
+          class="size-5 rounded-full border border-black/10 transition-transform hover:scale-115
+            {app.highlightColor === key ? 'ring-2 ring-ring ring-offset-1 ring-offset-popover' : ''}"
+          style="background: {HIGHLIGHT_COLORS[key].value}"
+          title="Highlight {HIGHLIGHT_COLORS[key].label.toLowerCase()}{app.highlightColor === key
+            ? ' (H)'
+            : ''}"
+          onclick={() => highlightSelection(key)}
+        ></button>
+      {/each}
+      {#if app.docSidecars}
+        <div class="mx-0.5 h-4 w-px bg-border"></div>
+        <button
+          class="flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium transition-colors hover:bg-accent"
+          onclick={createComment}
+        >
+          <MessageSquarePlus class="size-3.5" /> Comment
+        </button>
+      {/if}
+    </div>
+  {/if}
+  {#if hlPop && popHighlight}
+    {#key hlPop.id}
+      <HighlightPopover
+        highlight={popHighlight}
+        x={hlPop.x}
+        y={hlPop.y}
+        onclose={() => (hlPop = null)}
+      />
+    {/key}
   {/if}
   {#if linkCard}
     <LinkPreviewCard

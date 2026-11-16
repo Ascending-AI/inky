@@ -488,6 +488,33 @@ fn move_baseline(app: tauri::AppHandle, from: String, to: String) -> Result<(), 
     Ok(())
 }
 
+// --- highlights ----------------------------------------------------------------
+
+/// The reader's highlights for every document, as one JSON file the
+/// frontend owns (`{ "<doc path>": [highlight, …] }`). Kept in the app's
+/// data folder: they are the reader's marks, not part of the documents.
+fn highlights_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("highlights.json"))
+}
+
+#[tauri::command]
+fn read_highlights(app: tauri::AppHandle) -> Result<String, String> {
+    Ok(fs::read_to_string(highlights_file(&app)?).unwrap_or_default())
+}
+
+#[tauri::command]
+fn write_highlights(app: tauri::AppHandle, json: String) -> Result<(), String> {
+    serde_json::from_str::<serde_json::Value>(&json).map_err(|e| format!("invalid highlights: {e}"))?;
+    let file = highlights_file(&app)?;
+    if let Some(dir) = file.parent() {
+        fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    // Write-then-rename, so a crash mid-save never truncates the reader's marks.
+    let tmp = file.with_extension("json.tmp");
+    fs::write(&tmp, json).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &file).map_err(|e| e.to_string())
+}
+
 // --- undoable delete ---------------------------------------------------------
 
 struct UndoStash(std::sync::Mutex<std::collections::HashMap<String, library::StashedDelete>>);
@@ -1029,7 +1056,9 @@ pub fn run() {
             write_baseline,
             move_baseline,
             hide_path,
-            unhide_path
+            unhide_path,
+            read_highlights,
+            write_highlights
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

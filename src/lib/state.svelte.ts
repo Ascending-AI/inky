@@ -14,6 +14,16 @@ import { extractToc, type TocEntry } from "./markdown";
 import { isImagePath, isInside, remapPath } from "./paths";
 import { capturePosition, forgetPositions, remapPositions, targetScrollTop } from "./readpos";
 import { baselineAfterEdit, diffBlocks, type ChangeSet } from "./changes";
+import {
+  forgetInStore,
+  isColor,
+  parseStore,
+  remapStore,
+  type Highlight,
+  type HighlightColor,
+  type HighlightStore,
+} from "./highlights";
+import type { TextAnchor } from "./comments";
 import type { MediaItem } from "./components/ZoomViewer.svelte";
 import {
   DEFAULT_TYPOGRAPHY,
@@ -132,6 +142,19 @@ class AppState {
   #conflictPending = false;
 
   commentsVisible = $state(false);
+  highlightsVisible = $state(false);
+  /** Every document's highlights, by path (see $lib/highlights). */
+  highlightStore = $state<HighlightStore>({});
+  docHighlights = $derived<Highlight[]>(
+    this.currentPath ? (this.highlightStore[this.currentPath] ?? []) : [],
+  );
+  /** Where each of the open document's highlights sits (missing = text gone). */
+  highlightOrder = $state<Record<string, number>>({});
+  /** Colour for the next highlight (the last one used). */
+  highlightColor = $state<HighlightColor>("yellow");
+  /** A highlight the reading pane should scroll to once it is rendered. */
+  focusHighlightId = $state<string | null>(null);
+  #highlightsSaving: Promise<void> = Promise.resolve();
   commentThreads = $state<CommentThread[]>([]);
   commentFilter = $state<CommentFilter>("open");
   commentDraft = $state<CommentDraft | null>(null);
@@ -143,7 +166,8 @@ class AppState {
 
   openCommentCount = $derived(this.commentThreads.filter((t) => !t.resolved).length);
 
-  #preFocus: { viewMode: ViewMode; sidebar: boolean; toc: boolean } | null = null;
+  #preFocus: { viewMode: ViewMode; sidebar: boolean; toc: boolean; highlights: boolean } | null =
+    null;
 
   /** Set by the Editor component while mounted; used for TOC + search. */
   editorView: EditorView | null = null;
@@ -208,6 +232,9 @@ class AppState {
     this.syncScroll = localStorage.getItem("inky.syncScroll") !== "false";
     this.sidebarVisible = localStorage.getItem("inky.sidebar") !== "false";
     this.showHidden = localStorage.getItem("inky.showHidden") === "true";
+    const storedColor = localStorage.getItem("inky.highlightColor");
+    if (isColor(storedColor)) this.highlightColor = storedColor;
+    this.highlightStore = parseStore(await invoke<string>("read_highlights").catch(() => ""));
     this.applyTheme();
     this.applyReadingPrefs();
 
@@ -418,15 +445,20 @@ class AppState {
 
   toggleToc() {
     this.tocVisible = !this.tocVisible;
-    if (this.tocVisible) this.commentsVisible = false;
+    if (this.tocVisible) {
+      this.commentsVisible = false;
+      this.highlightsVisible = false;
+    }
     localStorage.setItem("inky.tocVisible", String(this.tocVisible));
   }
 
   toggleComments() {
     if (!this.docSidecars && !this.commentsVisible) return;
     this.commentsVisible = !this.commentsVisible;
-    if (this.commentsVisible) this.tocVisible = false;
-    else this.commentDraft = null;
+    if (this.commentsVisible) {
+      this.tocVisible = false;
+      this.highlightsVisible = false;
+    } else this.commentDraft = null;
   }
 
   // --- comments ------------------------------------------------------------
@@ -466,6 +498,7 @@ class AppState {
     this.commentDraft = draft;
     this.commentsVisible = true;
     this.tocVisible = false;
+    this.highlightsVisible = false;
     this.activeThreadId = null;
   }
 
@@ -523,6 +556,7 @@ class AppState {
     this.activeThreadId = threadId;
     this.commentsVisible = true;
     this.tocVisible = false;
+    this.highlightsVisible = false;
     const thread = this.commentThreads.find((t) => t.id === threadId);
     if (thread?.resolved && this.commentFilter === "open") this.commentFilter = "all";
   }
@@ -558,6 +592,95 @@ class AppState {
     if (this.currentPath) this.searchOpen = true;
   }
 
+  toggleHighlights() {
+    this.highlightsVisible = !this.highlightsVisible;
+    if (this.highlightsVisible) {
+      this.tocVisible = false;
+      this.commentsVisible = false;
+    }
+  }
+
+  // --- highlights (see $lib/highlights) ---------------------------------------
+
+  #saveHighlights() {
+    const json = JSON.stringify($state.snapshot(this.highlightStore));
+    // Chained, so saves land in order even when made in quick succession.
+    this.#highlightsSaving = this.#highlightsSaving.then(() =>
+      invoke("write_highlights", { json }).then(
+        () => {},
+        (e) => {
+          toast.error(`Could not save highlights: ${e}`);
+        },
+      ),
+    );
+  }
+
+  addHighlight(
+    anchor: TextAnchor & { text?: string },
+    color: HighlightColor = this.highlightColor,
+  ): string | null {
+    const path = this.currentPath;
+    if (!path || this.isMermaidDoc || !anchor.quote.trim()) return null;
+    const h: Highlight = {
+      id: newId("hl"),
+      quote: anchor.quote,
+      prefix: anchor.prefix,
+      suffix: anchor.suffix,
+      color,
+      note: "",
+      createdAt: new Date().toISOString(),
+    };
+    if (anchor.text && anchor.text !== anchor.quote) h.text = anchor.text;
+    this.highlightStore[path] = [...(this.highlightStore[path] ?? []), h];
+    this.highlightColor = color;
+    localStorage.setItem("inky.highlightColor", color);
+    this.#saveHighlights();
+    return h.id;
+  }
+
+  updateHighlight(id: string, patch: Partial<Pick<Highlight, "color" | "note">>) {
+    for (const list of Object.values(this.highlightStore)) {
+      const h = list.find((x) => x.id === id);
+      if (!h) continue;
+      Object.assign(h, patch);
+      if (patch.color) {
+        this.highlightColor = patch.color;
+        localStorage.setItem("inky.highlightColor", patch.color);
+      }
+      this.#saveHighlights();
+      return;
+    }
+  }
+
+  removeHighlight(id: string) {
+    for (const [path, list] of Object.entries(this.highlightStore)) {
+      const i = list.findIndex((x) => x.id === id);
+      if (i < 0) continue;
+      const removed = $state.snapshot(list[i]) as Highlight;
+      const rest = list.filter((x) => x.id !== id);
+      if (rest.length) this.highlightStore[path] = rest;
+      else delete this.highlightStore[path];
+      this.#saveHighlights();
+      toast.success("Highlight removed", {
+        action: {
+          label: "Undo",
+          onClick: () => {
+            this.highlightStore[path] = [...(this.highlightStore[path] ?? []), removed];
+            this.#saveHighlights();
+          },
+        },
+      });
+      return;
+    }
+  }
+
+  /** Show a highlight: open its document if needed, then scroll to it. */
+  async revealHighlight(path: string, id: string) {
+    if (path !== this.currentPath && !(await this.openDoc(path))) return;
+    if (this.viewMode === "editor") this.setViewMode("preview");
+    this.focusHighlightId = id;
+  }
+
   toggleSidebar() {
     this.sidebarVisible = !this.sidebarVisible;
     localStorage.setItem("inky.sidebar", String(this.sidebarVisible));
@@ -569,17 +692,20 @@ class AppState {
         viewMode: this.viewMode,
         sidebar: this.sidebarVisible,
         toc: this.tocVisible,
+        highlights: this.highlightsVisible,
       };
       this.focusMode = true;
       this.viewMode = "editor";
       this.sidebarVisible = false;
       this.tocVisible = false;
+      this.highlightsVisible = false;
     } else {
       this.focusMode = false;
       if (this.#preFocus) {
         this.viewMode = this.#preFocus.viewMode;
         this.sidebarVisible = this.#preFocus.sidebar;
         this.tocVisible = this.#preFocus.toc;
+        this.highlightsVisible = this.#preFocus.highlights;
         this.#preFocus = null;
       }
     }
@@ -636,6 +762,7 @@ class AppState {
       renamePath(this.nav, path, newPath);
       if (this.imagePath) this.imagePath = remapPath(this.imagePath, path, newPath);
       remapPositions(path, newPath);
+      if (remapStore(this.highlightStore, path, newPath)) this.#saveHighlights();
       invoke("move_baseline", { from: path, to: newPath }).catch(() => {});
       if (this.currentPath === path) {
         this.currentPath = newPath;
@@ -746,6 +873,7 @@ class AppState {
             onClick: () => {
               this.commentsVisible = true;
               this.tocVisible = false;
+              this.highlightsVisible = false;
             },
           },
         });
@@ -1021,6 +1149,7 @@ class AppState {
       renamePath(this.nav, path, newPath);
       if (this.imagePath) this.imagePath = remapPath(this.imagePath, path, newPath);
       remapPositions(path, newPath);
+      if (remapStore(this.highlightStore, path, newPath)) this.#saveHighlights();
       invoke("move_baseline", { from: path, to: newPath }).catch(() => {});
       if (this.currentPath === path) {
         this.currentPath = newPath;
@@ -1054,16 +1183,25 @@ class AppState {
       const token = await invoke<string | null>("delete_path", { path });
       forgetPath(this.nav, path);
       forgetPositions(path);
+      // Highlights are the reader's own work: drop them only once the delete
+      // is final, so Undo brings the document back with them.
+      const forgetHighlights = () => {
+        if (forgetInStore(this.highlightStore, path)) this.#saveHighlights();
+      };
       if (this.currentPath === path || this.currentPath?.startsWith(path + "/")) {
         this.closeDoc();
       }
       await this.refreshTree();
       if (!token) {
+        forgetHighlights();
         toast.success("Moved to Trash");
         return;
       }
       // Parked in the undo stash; it goes to the Trash when the toast expires.
-      const purge = () => invoke("purge_delete", { token }).catch(() => {});
+      const purge = () => {
+        forgetHighlights();
+        invoke("purge_delete", { token }).catch(() => {});
+      };
       const timer = setTimeout(purge, 8_000);
       toast.success(`Deleted ${name}`, {
         duration: 8_000,

@@ -97,15 +97,26 @@ export function contextAround(
   };
 }
 
+/** A quote plus the context that disambiguates it (comments, highlights). */
+export interface TextAnchor {
+  quote: string;
+  prefix: string;
+  suffix: string;
+}
+
 /**
- * Wrap `thread`'s quote in <mark class="comment-hl"> elements (one per
- * intersected text node). Returns the flat-text index or -1 if not found.
+ * Wrap `anchor`'s quote in elements from `makeMark` (one per intersected
+ * text node). Returns the flat-text index or -1 if not found.
  */
-export function wrapQuote(container: HTMLElement, thread: CommentThread): number {
+export function wrapAnchor(
+  container: HTMLElement,
+  anchor: TextAnchor,
+  makeMark: () => HTMLElement,
+): number {
   const { nodes, full } = buildTextIndex(container);
-  const idx = locateQuote(full, thread.quote, thread.prefix, thread.suffix);
+  const idx = locateQuote(full, anchor.quote, anchor.prefix, anchor.suffix);
   if (idx < 0) return -1;
-  const end = idx + thread.quote.length;
+  const end = idx + anchor.quote.length;
   // Wrap segments back-to-front so earlier offsets stay valid.
   for (let k = nodes.length - 1; k >= 0; k--) {
     const { node, start } = nodes[k];
@@ -116,16 +127,23 @@ export function wrapQuote(container: HTMLElement, thread: CommentThread): number
     const range = document.createRange();
     range.setStart(node, s - start);
     range.setEnd(node, e - start);
-    const mark = document.createElement("mark");
-    mark.className = "comment-hl";
-    mark.dataset.threadId = thread.id;
     try {
-      range.surroundContents(mark);
+      range.surroundContents(makeMark());
     } catch {
       // Overlapping with another wrap; skip this segment.
     }
   }
   return idx;
+}
+
+/** Wrap `thread`'s quote in <mark class="comment-hl"> elements. */
+export function wrapQuote(container: HTMLElement, thread: CommentThread): number {
+  return wrapAnchor(container, thread, () => {
+    const mark = document.createElement("mark");
+    mark.className = "comment-hl";
+    mark.dataset.threadId = thread.id;
+    return mark;
+  });
 }
 
 export function unwrapMarks(container: HTMLElement, selector: string) {

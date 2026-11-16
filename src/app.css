@@ -627,6 +627,72 @@
 }
 
 /* ---------------------------------- */
+/* Reader highlights (fluorescent)    */
+/* ---------------------------------- */
+
+/* Keep in sync with HIGHLIGHT_COLORS in $lib/highlights. */
+.prose-doc mark.hl-yellow { --hl: #fff200; }
+.prose-doc mark.hl-green { --hl: #4dff3a; }
+.prose-doc mark.hl-pink { --hl: #ff52d9; }
+.prose-doc mark.hl-blue { --hl: #2ee6ff; }
+.prose-doc mark.hl-orange { --hl: #ffa31a; }
+.prose-doc mark.hl-purple { --hl: #c98bff; }
+
+.prose-doc mark.hl {
+  /* Translucent ink, like a highlighter pen over the page colour. */
+  background: color-mix(in srgb, var(--hl) 75%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0.05em 0;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  cursor: pointer;
+}
+/* On a dark page, full-strength ink with dark text reads best. */
+:root.dark .prose-doc mark.hl {
+  background: var(--hl);
+  color: #111;
+}
+:root.dark .prose-doc mark.hl a {
+  color: #0b3a8c;
+}
+/* A small dot after a highlight that carries a note. */
+.prose-doc mark.hl[data-note]::after {
+  content: "";
+  display: inline-block;
+  width: 0.38em;
+  height: 0.38em;
+  margin-left: 0.12em;
+  vertical-align: super;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.55;
+}
+.prose-doc mark.hl.hl-flash {
+  animation: hl-flash 1.1s ease-out;
+}
+@keyframes hl-flash {
+  0%,
+  40% {
+    outline: 2px solid var(--hl);
+    outline-offset: 3px;
+  }
+  100% {
+    outline: 2px solid transparent;
+    outline-offset: 3px;
+  }
+}
+@media print {
+  .prose-doc mark.hl {
+    background: none;
+    color: inherit;
+  }
+  .prose-doc mark.hl[data-note]::after {
+    display: none;
+  }
+}
+
+/* ---------------------------------- */
 /* Changes since last read            */
 /* ---------------------------------- */
 
