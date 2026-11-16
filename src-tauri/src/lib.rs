@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
+pub mod baselines;
 pub mod library;
 pub mod mcp;
 pub mod opens;
@@ -452,6 +453,28 @@ fn start_watcher(app: &tauri::AppHandle) {
     {
         *state.0.lock().unwrap() = Some(debouncer);
     }
+}
+
+// --- "last read" baselines -------------------------------------------------
+
+fn baselines_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("read-baselines"))
+}
+
+#[tauri::command]
+fn read_baseline(app: tauri::AppHandle, path: String) -> Result<Option<String>, String> {
+    Ok(baselines::read(&baselines_dir(&app)?, &path))
+}
+
+#[tauri::command]
+fn write_baseline(app: tauri::AppHandle, path: String, content: String) -> Result<(), String> {
+    baselines::write(&baselines_dir(&app)?, &path, &content)
+}
+
+#[tauri::command]
+fn move_baseline(app: tauri::AppHandle, from: String, to: String) -> Result<(), String> {
+    baselines::rename(&baselines_dir(&app)?, &from, &to);
+    Ok(())
 }
 
 // --- undoable delete ---------------------------------------------------------
@@ -990,7 +1013,10 @@ pub fn run() {
             mcp_status,
             app_binary_path,
             undo_delete,
-            purge_delete
+            purge_delete,
+            read_baseline,
+            write_baseline,
+            move_baseline
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

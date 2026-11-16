@@ -36,6 +36,9 @@
   import CommentHoverCard from "./CommentHoverCard.svelte";
   import { capturePosition, getPosition, savePosition, targetScrollTop } from "$lib/readpos";
   import { linkTarget, openingHtml } from "$lib/linkpreview";
+  import { END as CHANGES_END } from "$lib/changes";
+  import ChevronUp from "@lucide/svelte/icons/chevron-up";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import LinkPreviewCard, { type LinkPreview } from "./LinkPreviewCard.svelte";
 
   let container: HTMLDivElement | undefined = $state();
@@ -126,6 +129,91 @@
       }
     });
   });
+
+  // --- changes since last read (see $lib/changes) ---------------------------
+  const CHANGE_CLASSES = ["chg-added", "chg-modified", "chg-removed-before", "chg-removed-after"];
+  const CHANGE_SELECTOR = CHANGE_CLASSES.map((c) => `.${c}`).join(", ");
+  /** Marked blocks in document order (the banner steps through these). */
+  let changeEls = $state<HTMLElement[]>([]);
+  let changeIdx = $state(-1);
+
+  $effect(() => {
+    html;
+    app.changes;
+    if (!container) return;
+    tick().then(() => {
+      computeBlockMap();
+      applyChangeMarks();
+    });
+  });
+
+  function applyChangeMarks() {
+    if (!container) return;
+    for (const el of container.querySelectorAll(CHANGE_SELECTOR)) el.classList.remove(...CHANGE_CLASSES);
+    const c = app.changes;
+    let last: Element | null = null;
+    if (c) {
+      for (const [el, block] of blockMap) {
+        const text = app.content.slice(block.start, block.end).trim();
+        if (c.changed.has(text)) el.classList.add(c.changed.get(text) === null ? "chg-added" : "chg-modified");
+        if (c.removedBefore.has(text)) el.classList.add("chg-removed-before");
+        last = el;
+      }
+      if (last && c.removedBefore.has(CHANGES_END)) last.classList.add("chg-removed-after");
+    }
+    changeEls = Array.from(container.querySelectorAll<HTMLElement>(CHANGE_SELECTOR));
+    if (changeIdx >= changeEls.length) changeIdx = -1;
+  }
+
+  function gotoChange(step: 1 | -1) {
+    if (changeEls.length === 0) return;
+    changeIdx =
+      changeIdx < 0
+        ? step > 0
+          ? 0
+          : changeEls.length - 1
+        : (changeIdx + step + changeEls.length) % changeEls.length;
+    const el = changeEls[changeIdx];
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.remove("chg-flash");
+    void el.offsetWidth; // restart the animation
+    el.classList.add("chg-flash");
+  }
+
+  /** Card with the earlier text of a changed block (gutter click). */
+  function showChangeCard(el: HTMLElement) {
+    const c = app.changes;
+    const block = blockMap.get(el);
+    if (!c || !block || !scroller) return;
+    const text = app.content.slice(block.start, block.end).trim();
+    const parts: string[] = [];
+    const section = (title: string, md: string) =>
+      `<p class="chg-card-title">${title}</p>${renderMarkdown(md)}`;
+    const removed = [
+      ...(c.removedBefore.get(text) ?? []),
+      ...(el.classList.contains("chg-removed-after") ? (c.removedBefore.get(CHANGES_END) ?? []) : []),
+    ];
+    if (removed.length) parts.push(section("Removed here", removed.join("\n\n")));
+    const old = c.changed.get(text);
+    if (old) parts.push(section("Before", old));
+    else if (old === null) parts.push(`<p class="chg-card-title">New since you last read</p>`);
+    if (!parts.length) return;
+    const tpl = document.createElement("template");
+    tpl.innerHTML = parts.join("");
+    resolveLocalImages(tpl.content);
+    const rect = el.getBoundingClientRect();
+    const srect = scroller.getBoundingClientRect();
+    linkAnchor = null;
+    linkHref = "";
+    linkCard = {
+      label: "Since you last read",
+      html: tpl.innerHTML,
+      hint: "Click to close",
+      x: Math.max(8, Math.min(rect.left - srect.left, srect.width - 360)),
+      y: rect.top - srect.top + scroller.scrollTop + 4,
+      above: false,
+    };
+  }
 
   // --- reading position (see $lib/readpos) ----------------------------------
   /** False until this mount has restored (or decided not to restore) a
@@ -836,6 +924,15 @@
   /** Rendered openings of linked documents, by resolved path. */
   const docOpenings = new Map<string, string>();
 
+  // A re-render replaces the link under the card; never leave it stranded.
+  $effect(() => {
+    void html;
+    untrack(() => {
+      linkCard = null;
+      linkAnchor = null;
+    });
+  });
+
   function cancelLinkHide() {
     if (linkHideTimer) clearTimeout(linkHideTimer);
     linkHideTimer = null;
@@ -1079,6 +1176,12 @@
   }
 
   function handleClick(event: MouseEvent) {
+    const chg = (event.target as HTMLElement).closest<HTMLElement>(CHANGE_SELECTOR);
+    if (chg && event.clientX < chg.getBoundingClientRect().left) {
+      showChangeCard(chg);
+      return;
+    }
+    if (linkCard) hideLinkCard(0);
     const checkbox = (event.target as HTMLElement).closest<HTMLInputElement>("input.task-checkbox");
     if (checkbox) {
       // The source update drives the re-render; don't let the DOM state fork.
@@ -1164,8 +1267,55 @@
         style="transform: scaleX({progress})"
       ></div>
     {/if}
-    {#if resumed}
+    {#if app.changes}
       <div class="absolute inset-x-0 top-3 flex justify-center">
+        <div
+          class="pointer-events-auto flex items-center gap-1 rounded-full border bg-popover py-1 pr-1 pl-3 text-xs shadow-md"
+        >
+          <span class="chg-dot mr-1 size-2 rounded-full"></span>
+          <span class="mr-1">
+            {#if changeEls.length}
+              {changeEls.length} {changeEls.length === 1 ? "change" : "changes"} since you last read
+            {:else}
+              Changed since you last read
+            {/if}
+          </span>
+          {#if changeEls.length}
+            <button
+              class="flex size-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              title="Previous change"
+              onclick={(e) => {
+                e.stopPropagation();
+                gotoChange(-1);
+              }}
+            >
+              <ChevronUp class="size-3.5" />
+            </button>
+            <button
+              class="flex size-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              title="Next change"
+              onclick={(e) => {
+                e.stopPropagation();
+                gotoChange(1);
+              }}
+            >
+              <ChevronDown class="size-3.5" />
+            </button>
+          {/if}
+          <button
+            class="rounded-full px-2 py-0.5 font-medium transition-colors hover:bg-accent"
+            onclick={(e) => {
+              e.stopPropagation();
+              app.markAsRead();
+            }}
+          >
+            Mark as read
+          </button>
+        </div>
+      </div>
+    {/if}
+    {#if resumed}
+      <div class="absolute inset-x-0 flex justify-center {app.changes ? 'top-13' : 'top-3'}">
         <div
           class="pointer-events-auto flex items-center gap-2 rounded-full border bg-popover py-1 pr-1 pl-3 text-xs shadow-md"
         >
@@ -1183,7 +1333,8 @@
       </div>
     {/if}
   </div>
-  <div class="prose-doc" bind:this={container}>
+  <!-- Room for the changes banner, so it never covers the title. -->
+  <div class="prose-doc" class:has-banner={!!app.changes} bind:this={container}>
     <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized via DOMPurify -->
     {@html html}
   </div>
@@ -1208,7 +1359,7 @@
       onopen={() => {
         const href = linkHref;
         hideLinkCard(0);
-        handleLink(href);
+        if (href) handleLink(href);
       }}
     />
   {/if}

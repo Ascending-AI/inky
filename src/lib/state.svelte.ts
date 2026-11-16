@@ -13,6 +13,7 @@ import { WELCOME_DOC, MERMAID_TEMPLATE } from "./templates";
 import { extractToc, type TocEntry } from "./markdown";
 import { isImagePath, isInside, remapPath } from "./paths";
 import { capturePosition, forgetPositions, remapPositions, targetScrollTop } from "./readpos";
+import { baselineAfterEdit, diffBlocks, type ChangeSet } from "./changes";
 import {
   DEFAULT_TYPOGRAPHY,
   loadTypography,
@@ -77,6 +78,10 @@ class AppState {
   recentDocs = $state<string[]>([]);
   tree = $state<TreeNode[]>([]);
   currentPath = $state<string | null>(null);
+  /** What changed in the open document since the reader last read it. */
+  changes = $state<ChangeSet | null>(null);
+  /** The open document as the reader last read it (see $lib/changes). */
+  #baseline: string | null = null;
   /** Image shown in the preview overlay (over the open document), if any. */
   imagePath = $state<string | null>(null);
   content = $state("");
@@ -622,6 +627,7 @@ class AppState {
       renamePath(this.nav, path, newPath);
       if (this.imagePath) this.imagePath = remapPath(this.imagePath, path, newPath);
       remapPositions(path, newPath);
+      invoke("move_baseline", { from: path, to: newPath }).catch(() => {});
       if (this.currentPath === path) {
         this.currentPath = newPath;
         localStorage.setItem("inky.lastDoc", newPath);
@@ -653,6 +659,7 @@ class AppState {
         if (disk !== this.savedContent) {
           this.savedContent = disk;
           this.content = disk;
+          this.#recomputeChanges();
         }
         this.#docMtime = await invoke<number>("doc_mtime", { path: this.currentPath }).catch(
           () => null,
@@ -727,10 +734,15 @@ class AppState {
       this.announceResume = true;
       this.#clearConflict();
       this.imagePath = null;
+      if (path !== this.currentPath) {
+        this.changes = null;
+        this.#baseline = null;
+      }
       this.currentPath = path;
       this.content = text;
       this.savedContent = text;
       this.#docMtime = await invoke<number>("doc_mtime", { path }).catch(() => null);
+      await this.#loadChanges(path, text);
       localStorage.setItem("inky.lastDoc", path);
       getCurrentWindow().setTitle(`${this.docName.replace(/\.(md|markdown|mmd)$/i, "")} — Inky`);
       this.docSidecars = await invoke<boolean>("doc_sidecars", { path }).catch(() => false);
@@ -791,6 +803,8 @@ class AppState {
   closeDoc() {
     this.#clearConflict();
     this.currentPath = null;
+    this.changes = null;
+    this.#baseline = null;
     this.content = "";
     this.savedContent = "";
     this.commentThreads = [];
@@ -809,6 +823,7 @@ class AppState {
     }
     const path = this.currentPath;
     const text = this.content;
+    const edited = text !== this.savedContent;
     try {
       // Warn if the file changed on disk while we were editing (an agent via
       // MCP, another machine, …). In the library write_doc snapshots the disk
@@ -830,9 +845,47 @@ class AppState {
       await invoke("write_doc", { path, content: text });
       this.savedContent = text;
       this.#docMtime = await invoke<number>("doc_mtime", { path }).catch(() => null);
+      if (edited) this.#noteOwnEdit(path, text);
     } catch (e) {
       toast.error(`Save failed: ${e}`);
     }
+  }
+
+  // --- changes since last read (see $lib/changes) ----------------------------
+
+  async #loadChanges(path: string, text: string) {
+    const base = await invoke<string | null>("read_baseline", { path }).catch(() => null);
+    if (this.currentPath !== path) return;
+    if (base === null) {
+      // First visit: what the reader sees now is what they have read.
+      this.#baseline = text;
+      this.changes = null;
+      invoke("write_baseline", { path, content: text }).catch(() => {});
+      return;
+    }
+    this.#baseline = base;
+    this.#recomputeChanges();
+  }
+
+  #recomputeChanges() {
+    this.changes =
+      this.#baseline === null || this.isMermaidDoc ? null : diffBlocks(this.#baseline, this.content);
+  }
+
+  /** The reader's own saved edits count as read; unread changes stay unread. */
+  #noteOwnEdit(path: string, text: string) {
+    if (path !== this.currentPath || this.#baseline === null) return;
+    this.#baseline = this.changes ? baselineAfterEdit(text, this.changes) : text;
+    this.#recomputeChanges();
+    invoke("write_baseline", { path, content: this.#baseline }).catch(() => {});
+  }
+
+  markAsRead() {
+    const path = this.currentPath;
+    if (!path) return;
+    this.#baseline = this.content;
+    this.changes = null;
+    invoke("write_baseline", { path, content: this.content }).catch(() => {});
   }
 
   scheduleAutosave() {
@@ -868,6 +921,7 @@ class AppState {
       const text = await invoke<string>("read_doc", { path });
       this.content = text;
       this.savedContent = text;
+      this.#recomputeChanges();
       this.#docMtime = await invoke<number>("doc_mtime", { path }).catch(() => null);
     } catch (e) {
       toast.error(`Could not reload: ${e}`);
@@ -906,6 +960,7 @@ class AppState {
       renamePath(this.nav, path, newPath);
       if (this.imagePath) this.imagePath = remapPath(this.imagePath, path, newPath);
       remapPositions(path, newPath);
+      invoke("move_baseline", { from: path, to: newPath }).catch(() => {});
       if (this.currentPath === path) {
         this.currentPath = newPath;
         localStorage.setItem("inky.lastDoc", newPath);

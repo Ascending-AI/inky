@@ -259,8 +259,8 @@
   margin: var(--prose-para-gap, 0.9em) 0;
 }
 /* Book layout (Reading settings): justified, hyphenated running text. */
-:root.justify-text .prose-doc p,
-:root.justify-text .prose-doc li {
+:root.justify-text .prose-doc:not(.link-preview-body) p,
+:root.justify-text .prose-doc:not(.link-preview-body) li {
   text-align: justify;
   hyphens: auto;
   -webkit-hyphens: auto;
@@ -614,6 +614,107 @@
   .prose-doc mark.comment-hl {
     background: none !important;
     border-bottom: none !important;
+  }
+}
+
+/* ---------------------------------- */
+/* Changes since last read            */
+/* ---------------------------------- */
+
+.prose-doc {
+  --chg-added: oklch(0.66 0.15 150);
+  --chg-modified: oklch(0.75 0.15 75);
+  --chg-removed: oklch(0.62 0.2 25);
+}
+.prose-doc.has-banner {
+  padding-top: 2.25rem;
+}
+@media print {
+  .prose-doc.has-banner {
+    padding-top: 0;
+  }
+}
+.chg-dot {
+  background: var(--chg-modified);
+}
+.prose-doc > .chg-added,
+.prose-doc > .chg-modified,
+.prose-doc > .chg-removed-before,
+.prose-doc > .chg-removed-after {
+  position: relative;
+}
+/* Margin bar: a wide, clickable strip with a thin visible line. */
+.prose-doc > .chg-added::before,
+.prose-doc > .chg-modified::before {
+  content: "";
+  position: absolute;
+  left: -1.5rem;
+  top: 0.1em;
+  bottom: 0.1em;
+  width: 0.9rem;
+  cursor: pointer;
+  background: linear-gradient(
+    to right,
+    transparent 0.45rem,
+    var(--chg-color) 0.45rem,
+    var(--chg-color) calc(0.45rem + 3px),
+    transparent calc(0.45rem + 3px)
+  );
+}
+.prose-doc > .chg-added {
+  --chg-color: var(--chg-added);
+}
+.prose-doc > .chg-modified {
+  --chg-color: var(--chg-modified);
+}
+/* Something was removed just above (or below, at the end of the document). */
+.prose-doc > .chg-removed-before::after,
+.prose-doc > .chg-removed-after::after {
+  content: "";
+  position: absolute;
+  left: -1.55rem;
+  width: 0.7rem;
+  height: 0.7rem;
+  cursor: pointer;
+  border-radius: 999px;
+  border: 2px solid var(--background);
+  background: var(--chg-removed);
+}
+.prose-doc > .chg-removed-before::after {
+  top: -0.55rem;
+}
+.prose-doc > .chg-removed-after::after {
+  bottom: -0.55rem;
+}
+.prose-doc > .chg-flash {
+  animation: chg-flash 1.2s ease-out;
+}
+@keyframes chg-flash {
+  from {
+    background: color-mix(in oklch, var(--chg-color, var(--chg-removed)) 22%, transparent);
+  }
+  to {
+    background: transparent;
+  }
+}
+.link-preview .chg-card-title {
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 0.75em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+  margin: 0 0 0.3em;
+}
+.link-preview .chg-card-title:not(:first-child) {
+  margin-top: 0.9em;
+}
+@media print {
+  .prose-doc > .chg-added::before,
+  .prose-doc > .chg-modified::before,
+  .prose-doc > .chg-removed-before::after,
+  .prose-doc > .chg-removed-after::after {
+    display: none;
   }
 }
 
