@@ -140,7 +140,7 @@ notarization — `tauri build` supports it via the `APPLE_*` signing env vars.)
 
 The app checks for updates on launch (silently) and via **Inky → Check for
 Updates…**. The updater endpoint in `src-tauri/tauri.conf.json` points at the
-latest GitHub release of `juanjo/inky`. Shipping an update:
+latest GitHub release of `Ascending-AI/inky`. Shipping an update:
 
 1. Bump `version` in `src-tauri/tauri.conf.json` and commit.
 2. `git tag v<version> && git push --tags` — CI
