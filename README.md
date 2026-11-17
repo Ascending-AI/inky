@@ -19,16 +19,9 @@ database, no account, and nothing leaves your Mac.
 
 ## Install
 
-Download the latest `Inky_<version>_aarch64.dmg` from
-[Releases](https://github.com/Ascending-AI/inky/releases) and drag Inky into
-Applications. It needs an Apple-silicon Mac.
-
-The app is signed for updates but not notarized by Apple, so the first launch
-needs **right-click → Open**, or:
-
-```sh
-xattr -cr /Applications/Inky.app
-```
+Download Inky from <https://inky.ascending.ai> and drag it into Applications.
+It needs an Apple-silicon Mac. The app is signed and notarized by Apple, so it
+opens like any other.
 
 Inky checks for updates on launch and from **Inky → Check for Updates…**.
 
@@ -271,17 +264,25 @@ backend is Tauri 2 and Rust; the MCP server is `src-tauri/src/mcp.rs`. Run
 | Target | What it does |
 | --- | --- |
 | `make dev` | Run the app with hot reload |
-| `make check` | Type-check the frontend and Rust, run the Rust tests (`pnpm test` runs the frontend tests) |
-| `make dmg` | Build the signed `.app`, `.dmg` and updater artifacts |
-| `make release` | `make dmg`, then assemble `dist/release/` for a GitHub release (with `latest.json`) |
+| `make check` | Type-check the frontend and Rust, run the Rust and release-script tests (`pnpm test` runs the frontend tests) |
+| `make dmg` | Build the `.app`, `.dmg` and updater artifacts for your own Mac |
+| `make release` | The release build: what CI runs on a tag (see [Releasing](#releasing)) |
+| `make web-dev` / `make web-build` / `make web-check` | The download site in `web/` |
 | `make icons` | Regenerate all app icons from `assets/icon.svg` |
 | `make open` | Open the last built app |
 | `make mcp` | Run the MCP server on stdio (dev build) |
 | `make clean` | Remove build outputs |
 
-Builds are signed with `~/.tauri/inky.key` (override with `make dmg KEY=…`).
-Plain `pnpm tauri build` fails without it; `pnpm bundle` is an alias for
-`make dmg`.
+`make dmg` signs the update files with `~/.tauri/inky.key` (override with
+`make dmg KEY=…`). Plain `pnpm tauri build` fails without it; `pnpm bundle` is
+an alias for `make dmg`. It produces:
+
+- `src-tauri/target/release/bundle/macos/Inky.app`
+- `src-tauri/target/release/bundle/dmg/Inky_<version>_aarch64.dmg`
+
+A local build is signed ad hoc, not with an Apple Developer ID. Another Mac
+refuses it until **right-click → Open** or `xattr -cr /Applications/Inky.app`.
+The builds that people download come from CI, signed and notarized.
 
 To use the running app from Claude Code sessions in this repo, `.mcp.json`
 reads the token from an environment variable:
@@ -292,14 +293,29 @@ export INKY_MCP_TOKEN=<token from the Connect an agent window>
 
 ## Releasing
 
-1. Bump `version` in `src-tauri/tauri.conf.json` and commit.
-2. Run `git tag v<version> && git push --tags`. CI
-   (`.github/workflows/release.yml`) builds, signs and publishes the release
-   with its `latest.json` update feed. (`make release` does the same
-   locally.)
-3. Existing installs pick the update up on their next launch.
+People download Inky from <https://inky.ascending.ai> (the site in `web/`).
+The updater reads the feed on the download host
+(`https://inky-downloads.ascending.ai/app/latest.json`, the updater endpoint
+in `src-tauri/tauri.conf.json`). Shipping an update:
 
-The updater reads `latest.json` from the latest release of
-`Ascending-AI/inky`. Updates are signed with `~/.tauri/inky.key`, which is
-mirrored in the repo's `TAURI_SIGNING_PRIVATE_KEY` Actions secret. **Back that
-file up:** without it you can't ship updates to existing installs.
+1. Merge to `main` and push.
+2. Run `git tag v<version> main && git push origin v<version>`. CI
+   (`.github/workflows/release.yml`) builds the app with that version, signs
+   it with the team's Developer ID, has Apple notarize it, and publishes it
+   to the download host and as a GitHub release. Do not bump `version` in
+   `tauri.conf.json`: the tag is the version.
+3. Existing installs pick the update up on their next launch. The site shows
+   the new version without a deploy.
+
+The details, the repository settings and what to do when a run fails:
+
+- [`docs/ops/desktop-release.md`](docs/ops/desktop-release.md): the release.
+- [`docs/ops/web-deploy.md`](docs/ops/web-deploy.md): the site, deployed to
+  Cloudflare Workers on a push to `main` that changes `web/`.
+- [`infra/cloudflare`](infra/cloudflare/README.md) and
+  [`infra/github`](infra/github/README.md): the download host (an R2 bucket)
+  and the repository settings, set up once with OpenTofu.
+
+Updates are signed with the update key (`~/.tauri/inky.key`, mirrored in the
+repo's `TAURI_SIGNING_PRIVATE_KEY` Actions secret). **Back that file up:**
+without it you can't ship updates to existing installs.

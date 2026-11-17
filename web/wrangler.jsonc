@@ -1,0 +1,16 @@
+// The download site on Cloudflare Workers: static files only, no Worker code.
+// The deploy workflow runs `wrangler deploy` (.github/workflows/web-deploy.yml,
+// docs/ops/web-deploy.md). Wrangler makes the domain's DNS record and certificate.
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "inky-web",
+	"compatibility_date": "2026-11-01",
+	"assets": {
+		"directory": "./dist",
+		"not_found_handling": "404-page"
+	},
+	"routes": [{ "pattern": "inky.ascending.ai", "custom_domain": true }],
+	// The site is served at its domain only.
+	"workers_dev": false,
+	"preview_urls": false
+}

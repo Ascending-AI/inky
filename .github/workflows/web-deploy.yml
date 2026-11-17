@@ -1,0 +1,97 @@
+name: Web deploy
+
+# A push to main that changes the download site deploys it to Cloudflare
+# Workers at https://inky.ascending.ai (web/wrangler.jsonc). The site is
+# static files. A desktop release needs no deploy: the page links to the latest
+# installer and reads the version from the download host.
+#
+# docs/ops/web-deploy.md lists the variable, the secret and the steps.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/web-deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-deploy
+  cancel-in-progress: false
+
+env:
+  SITE: https://inky.ascending.ai
+
+jobs:
+  deploy:
+    # A manual run deploys main only.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Settings are set
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          missing=0
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::The variable CLOUDFLARE_ACCOUNT_ID is not set (docs/ops/web-deploy.md)."
+            missing=1
+          fi
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::The secret CLOUDFLARE_API_TOKEN is not set (docs/ops/web-deploy.md)."
+            missing=1
+          fi
+          exit $missing
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      # The site is its own package (web/pnpm-lock.yaml): the app's packages are not needed.
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+
+      - name: Check, test and build
+        working-directory: web
+        run: |
+          pnpm check
+          pnpm test
+          pnpm build
+
+      - name: Deploy
+        working-directory: web
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          WRANGLER_SEND_METRICS: "false"
+        run: pnpm exec wrangler deploy
+
+      # The first deploy makes the domain's certificate: that takes about a minute.
+      - name: The site serves the new build
+        run: |
+          # The name of the built stylesheet changes with its content.
+          css=$(grep -o '/_astro/[^"]*\.css' web/dist/index.html | head -1)
+          if [ -z "$css" ]; then
+            echo "::error::The build has no stylesheet."
+            exit 1
+          fi
+          for _ in $(seq 1 12); do
+            if curl -fsS "$SITE/" | grep -qF "$css"; then
+              echo "$SITE serves this build."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$SITE does not serve this build after 2 minutes."
+          exit 1
