@@ -1,0 +1,186 @@
+---
+/*
+ * The download page. The main button links to the latest installer on the download host: that
+ * file changes with each release, so the page needs no new build. The script shows the version
+ * from the update feed (app/latest.json) and selects the visitor's platform.
+ *
+ * The platforms are in src/lib/platforms.ts. A platform without an installer shows "Not available yet".
+ */
+import icon from '../assets/icon.png';
+import favicon from '../assets/favicon.png';
+import { PLATFORMS, downloadBase, feedUrl, installerUrl } from '../lib/platforms';
+import '../styles/site.css';
+
+const base = downloadBase(import.meta.env.PUBLIC_DOWNLOAD_BASE);
+const available = PLATFORMS.filter((p) => p.installers.length > 0);
+// Without the script, the page offers the first platform that has an installer.
+const fallback = available[0]?.id;
+const source = 'https://github.com/Ascending-AI/inky';
+
+const facts = [
+	{
+		title: 'Plain markdown files',
+		text: 'Your documents are .md files in a folder on your Mac. There is no database and no account.'
+	},
+	{
+		title: 'Read, write, comment',
+		text: 'A reading view that you can type in, a split view, highlights, and comment threads beside the text.'
+	},
+	{
+		title: 'Open to your agents',
+		text: 'The built-in MCP server lets Claude and other agents read and write your library.'
+	}
+];
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta
+			name="description"
+			content="Inky is a small, pleasant macOS app for reading and writing markdown."
+		/>
+		<link rel="icon" type="image/png" href={favicon.src} />
+		<title>Inky: a pleasant markdown reader and editor</title>
+	</head>
+	<body class="bg-background min-h-dvh">
+		<main
+			class="mx-auto flex w-full max-w-2xl flex-col gap-16 px-6 py-16 sm:py-24"
+			data-feed={feedUrl(base)}
+		>
+			<header class="flex flex-col items-start gap-6">
+				<!-- The PNG has a transparent margin: the negative margin puts the tile's edge on the text's edge. -->
+				<img src={icon.src} alt="" width="112" height="112" class="app-icon -ml-2.5 size-28" />
+				<div class="flex flex-col gap-3">
+					<h1 class="font-serif text-5xl font-semibold tracking-tight">Inky</h1>
+					<p class="text-muted-foreground max-w-xl text-lg text-pretty">
+						A small, pleasant app for reading and writing markdown. Your documents stay plain
+						files on your Mac.
+					</p>
+				</div>
+
+				{
+					PLATFORMS.map((p) => {
+						const main = p.installers[0];
+						return (
+							<div
+								class="flex flex-col items-start gap-3"
+								data-hero={p.id}
+								hidden={p.id !== fallback}
+							>
+								{main ? (
+									<>
+										<a
+											href={installerUrl(base, main)}
+											class="bg-primary text-primary-foreground inline-flex h-12 items-center rounded-md px-6 text-base font-semibold transition-opacity hover:opacity-90"
+										>
+											Download for {p.name}
+										</a>
+										<p class="text-muted-foreground font-mono text-xs">
+											<span data-version={main.feedKey} hidden />
+											{main.label} · {p.requirement}
+										</p>
+									</>
+								) : (
+									<p class="border-border bg-card rounded-lg border px-4 py-3 text-sm">
+										Inky is not available for {p.name} yet.
+									</p>
+								)}
+							</div>
+						);
+					})
+				}
+			</header>
+
+			<section class="flex flex-col gap-4" aria-labelledby="about">
+				<h2 id="about" class="text-muted-foreground font-mono text-xs uppercase tracking-wider">
+					What it does
+				</h2>
+				<ul class="grid gap-3 sm:grid-cols-3">
+					{
+						facts.map((fact) => (
+							<li class="border-border bg-card flex flex-col gap-2 rounded-lg border p-4">
+								<span class="text-sm font-medium">{fact.title}</span>
+								<span class="text-muted-foreground text-sm text-pretty">{fact.text}</span>
+							</li>
+						))
+					}
+				</ul>
+			</section>
+
+			<section class="flex flex-col gap-4" aria-labelledby="platforms">
+				<h2 id="platforms" class="text-muted-foreground font-mono text-xs uppercase tracking-wider">
+					All platforms
+				</h2>
+				<ul class="border-border flex flex-col border-b">
+					{
+						PLATFORMS.map((p) => (
+							<li
+								class="border-border grid min-h-14 grid-cols-[6rem_1fr_auto] items-center gap-4 border-t py-3"
+								data-platform={p.id}
+							>
+								<span class="font-medium">{p.name}</span>
+								{p.installers.length > 0 ? (
+									<>
+										<span class="text-muted-foreground text-sm">{p.requirement}</span>
+										<span class="flex flex-wrap justify-end gap-x-4 gap-y-1">
+											{p.installers.map((i) => (
+												<a
+													href={installerUrl(base, i)}
+													class="text-link text-sm font-medium underline-offset-4 hover:underline"
+												>
+													{i.label}
+												</a>
+											))}
+										</span>
+									</>
+								) : (
+									<>
+										<span class="text-muted-foreground text-sm">Not available yet</span>
+										<span />
+									</>
+								)}
+							</li>
+						))
+					}
+				</ul>
+			</section>
+
+			<footer class="text-muted-foreground text-sm">
+				Inky updates itself. It is open source:
+				<a href={source} class="text-link font-medium underline-offset-4 hover:underline"
+					>the code is on GitHub</a
+				>.
+			</footer>
+		</main>
+
+		<script>
+			import { detectPlatform, feedVersion } from '../lib/platforms';
+
+			// The visitor's platform takes the place of the fallback at the top of the page.
+			const os = detectPlatform(navigator.userAgent, navigator.maxTouchPoints);
+			const heroes = document.querySelectorAll<HTMLElement>('[data-hero]');
+			if (os && [...heroes].some((hero) => hero.dataset.hero === os)) {
+				for (const hero of heroes) hero.hidden = hero.dataset.hero !== os;
+			}
+
+			// The version of each build, from the update feed. Without the feed the page shows no version.
+			const feed = document.querySelector<HTMLElement>('[data-feed]')?.dataset.feed;
+			if (feed) {
+				fetch(feed, { cache: 'no-store' })
+					.then((response) => (response.ok ? response.json() : null))
+					.then((latest) => {
+						for (const label of document.querySelectorAll<HTMLElement>('[data-version]')) {
+							const version = feedVersion(latest, label.dataset.version ?? '');
+							if (!version) continue;
+							label.textContent = `Version ${version} · `;
+							label.hidden = false;
+						}
+					})
+					.catch(() => {});
+			}
+		</script>
+	</body>
+</html>

@@ -1,0 +1,78 @@
+@import 'tailwindcss';
+
+/*
+ * Inky's colours, from the app (src/app.css): the Book theme (warm paper) in the light, the
+ * anthracite Dark theme in the dark. The page follows the system setting.
+ */
+:root {
+	color-scheme: light dark;
+	--radius: 0.5rem;
+	--background: oklch(0.955 0.018 84);
+	--foreground: oklch(0.3 0.03 60);
+	--card: oklch(0.97 0.014 84);
+	--primary: oklch(0.27 0.03 285);
+	--primary-foreground: oklch(0.97 0.014 84);
+	--muted-foreground: oklch(0.5 0.03 60);
+	--link: oklch(0.45 0.1 40);
+	--border: oklch(0.87 0.02 80);
+	--ring: oklch(0.6 0.05 60);
+	--icon-shadow: oklch(0.3 0.03 60 / 0.22);
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--background: oklch(0.245 0.006 264);
+		--foreground: oklch(0.95 0.004 264);
+		--card: oklch(0.285 0.006 264);
+		--primary: oklch(0.945 0.03 88);
+		--primary-foreground: oklch(0.245 0.006 264);
+		--muted-foreground: oklch(0.72 0.012 264);
+		--link: oklch(0.82 0.08 75);
+		--border: oklch(1 0 0 / 13%);
+		--ring: oklch(0.58 0.014 264);
+		--icon-shadow: oklch(0 0 0 / 0.45);
+	}
+}
+
+@theme inline {
+	--radius-md: calc(var(--radius) - 2px);
+	--radius-lg: var(--radius);
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-card: var(--card);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-link: var(--link);
+	--color-border: var(--border);
+	/* The fonts of the app: the system's text font, and the Book theme's serif for titles. */
+	--font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+	--font-serif: 'Iowan Old Style', 'Palatino', 'Georgia', serif;
+	--font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+@layer base {
+	* {
+		border-color: var(--border);
+	}
+	html {
+		background-color: var(--background);
+	}
+	body {
+		color: var(--foreground);
+		font-family: var(--font-sans);
+		-webkit-font-smoothing: antialiased;
+	}
+	:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+	}
+}
+
+/*
+ * The app icon: its tile is paper-coloured, like the light page. drop-shadow follows the tile's
+ * rounded shape (the PNG has a transparent margin) and sets it apart.
+ */
+.app-icon {
+	filter: drop-shadow(0 1px 1px var(--icon-shadow)) drop-shadow(0 10px 24px var(--icon-shadow));
+}
