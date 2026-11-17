@@ -31,6 +31,7 @@ pub type Opener = std::sync::Arc<dyn Fn(&std::path::Path) -> Result<(), String> 
 
 /// Hand the file to Inky through macOS `open`, exactly like a Finder
 /// double-click — works from the in-app server and from `Inky --mcp` alike.
+#[cfg(target_os = "macos")]
 fn open_in_app(path: &std::path::Path) -> Result<(), String> {
     let status = std::process::Command::new("open")
         .args(["-b", "com.inky.app"])
@@ -42,6 +43,22 @@ fn open_in_app(path: &std::path::Path) -> Result<(), String> {
     } else {
         Err("Could not open the document in Inky — is Inky installed?".into())
     }
+}
+
+/// Launch this same executable with the file, like an Explorer double-click:
+/// the single-instance plugin hands it to the running window (or this starts
+/// one). Not waited on — a first instance runs until the user quits it.
+#[cfg(not(target_os = "macos"))]
+fn open_in_app(path: &std::path::Path) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    std::process::Command::new(exe)
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(drop)
+        .map_err(|e| format!("Could not open the document in Inky: {e}"))
 }
 
 #[derive(Clone)]
@@ -256,7 +273,7 @@ impl InkyMcp {
         } else {
             listing
         };
-        ok(format!("Library root: {}\n\n{listing}", self.lib.root().display()))
+        ok(format!("Library root: {}\n\n{listing}", crate::library::path_text(self.lib.root())))
     }
 
     #[tool(

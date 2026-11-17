@@ -359,7 +359,7 @@
   width: 60%;
 }
 .prose-doc code {
-  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.875em;
   background: var(--prose-code-bg);
   border-radius: 5px;
@@ -427,7 +427,7 @@
   border: 1px solid var(--destructive);
   border-radius: 8px;
   padding: 0.8em 1em;
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 0.8em;
   color: var(--destructive);
   white-space: pre-wrap;
@@ -497,7 +497,7 @@
   outline: none;
 }
 .editor-host .cm-scroller {
-  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   line-height: 1.7;
   padding: 1rem 0.5rem 40vh;
 }
@@ -587,7 +587,7 @@
   outline: none;
 }
 .prose-doc .block-edit-cm .cm-scroller {
-  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   line-height: 1.55;
   padding: 1em 1.2em;
 }
@@ -785,7 +785,7 @@
   }
 }
 .link-preview .chg-card-title {
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 0.75em;
   font-weight: 600;
   text-transform: uppercase;

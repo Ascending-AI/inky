@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { fileManager } from "$lib/platform";
   import type { TreeNode } from "$lib/types";
   import { app } from "$lib/state.svelte";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -135,7 +136,7 @@
             <DropdownMenu.Separator />
           {/if}
           <DropdownMenu.Item onclick={() => onrequestrename(node)}>Rename…</DropdownMenu.Item>
-          <DropdownMenu.Item onclick={revealInFinder}>Reveal in Finder</DropdownMenu.Item>
+          <DropdownMenu.Item onclick={revealInFinder}>Reveal in {fileManager}</DropdownMenu.Item>
           {#if node.hidden}
             <DropdownMenu.Item onclick={() => app.unhidePath(node.path)}>Unhide</DropdownMenu.Item>
           {:else}
@@ -159,7 +160,7 @@
       <ContextMenu.Separator />
     {/if}
     <ContextMenu.Item onclick={() => onrequestrename(node)}>Rename…</ContextMenu.Item>
-    <ContextMenu.Item onclick={revealInFinder}>Reveal in Finder</ContextMenu.Item>
+    <ContextMenu.Item onclick={revealInFinder}>Reveal in {fileManager}</ContextMenu.Item>
     {#if node.hidden}
       <ContextMenu.Item onclick={() => app.unhidePath(node.path)}>Unhide</ContextMenu.Item>
     {:else}

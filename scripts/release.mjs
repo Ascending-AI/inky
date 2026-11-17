@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 /**
- * Assemble a GitHub-release folder in dist/release:
- *   - Inky_<version>_aarch64.dmg   (for new users)
- *   - Inky.app.tar.gz + .sig       (consumed by the auto-updater)
- *   - latest.json                  (the updater feed — upload as-is)
+ * Assemble a GitHub-release folder in dist/release from whichever platforms
+ * were built:
+ *   macOS:   Inky_<version>_aarch64.dmg (new users), Inky.app.tar.gz + .sig (updater)
+ *   Windows: Inky_<version>_x64-setup.exe (new users and updater) + .sig
+ *   latest.json — the updater feed covering every platform found (upload as-is)
+ *
+ * Artifacts are looked up under the local bundle folder, or under the folders
+ * given as arguments (CI downloads each platform's bundle into its own folder):
+ *   node scripts/release.mjs [dir…]
  *
  * The download URL is derived from the updater endpoint in tauri.conf.json;
  * override the repo with:  REPO=owner/name node scripts/release.mjs
@@ -30,37 +35,65 @@ if (!repo || repo.includes("REPLACE_WITH")) {
   repo ??= "REPLACE_WITH_YOUR_GITHUB_USER/inky";
 }
 
-const dmg = path.join(bundle, "dmg", `Inky_${version}_aarch64.dmg`);
-const tarball = path.join(bundle, "macos", "Inky.app.tar.gz");
-const sig = `${tarball}.sig`;
-for (const f of [dmg, tarball, sig]) {
-  if (!fs.existsSync(f)) {
-    console.error(`Missing artifact: ${f}\nRun \`make dmg\` first.`);
-    process.exit(1);
+const dirs = process.argv.length > 2 ? process.argv.slice(2) : [bundle];
+
+/** First file named `name` anywhere under `dirs`. */
+function find(name) {
+  for (const dir of dirs) {
+    const hit = fs
+      .readdirSync(dir, { recursive: true })
+      .map(String)
+      .find((f) => path.basename(f) === name);
+    if (hit) return path.join(dir, hit);
   }
+  return null;
 }
+
+const download = (file) => `https://github.com/${repo}/releases/download/v${version}/${file}`;
+
+const PLATFORMS = [
+  {
+    key: "darwin-aarch64",
+    label: "macOS",
+    installer: `Inky_${version}_aarch64.dmg`,
+    update: "Inky.app.tar.gz",
+  },
+  {
+    key: "windows-x86_64",
+    label: "Windows",
+    installer: `Inky_${version}_x64-setup.exe`,
+    update: `Inky_${version}_x64-setup.exe`,
+  },
+];
 
 const out = path.join(root, "dist", "release");
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
-for (const f of [dmg, tarball, sig]) {
-  fs.copyFileSync(f, path.join(out, path.basename(f)));
+
+const platforms = {};
+for (const p of PLATFORMS) {
+  const files = [p.installer, p.update, `${p.update}.sig`].map((name) => [name, find(name)]);
+  const missing = files.filter(([, f]) => !f).map(([name]) => name);
+  if (missing.length === files.length) continue;
+  if (missing.length) {
+    console.error(`${p.label} build is incomplete; missing: ${missing.join(", ")}`);
+    process.exit(1);
+  }
+  for (const [name, f] of files) fs.copyFileSync(f, path.join(out, name));
+  platforms[p.key] = {
+    signature: fs.readFileSync(path.join(out, `${p.update}.sig`), "utf8").trim(),
+    url: download(p.update),
+  };
+  console.log(`Found the ${p.label} build`);
+}
+if (!Object.keys(platforms).length) {
+  console.error(`No build artifacts under ${dirs.join(", ")}.\nRun \`make dmg\` (or build on Windows) first.`);
+  process.exit(1);
 }
 
-const latest = {
-  version,
-  pub_date: new Date().toISOString(),
-  platforms: {
-    "darwin-aarch64": {
-      signature: fs.readFileSync(sig, "utf8").trim(),
-      url: `https://github.com/${repo}/releases/download/v${version}/Inky.app.tar.gz`,
-    },
-  },
-};
+const latest = { version, pub_date: new Date().toISOString(), platforms };
 fs.writeFileSync(path.join(out, "latest.json"), JSON.stringify(latest, null, 2) + "\n");
 
 console.log(`\nRelease v${version} assembled in dist/release:`);
 for (const f of fs.readdirSync(out)) console.log(`  ${f}`);
-console.log(
-  `\nNext: create GitHub release "v${version}" on ${repo} and upload all four files.`,
-);
+console.log(`\nNext: create GitHub release "v${version}" on ${repo} and upload all of these files.`);

@@ -1,3 +1,4 @@
+import { fileManager, slashed } from "$lib/platform";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
@@ -270,7 +271,7 @@ class AppState {
     this.applyReadingPrefs();
 
     this.libraryRoot = await invoke<string>("library_root");
-    this.homeDir = await homeDir().catch(() => "");
+    this.homeDir = slashed(await homeDir().catch(() => ""));
     this.workspace = await invoke<string | null>("workspace_root").catch(() => null);
     await this.refreshTree();
 
@@ -1409,11 +1410,12 @@ class AppState {
   async exportPdf() {
     if (!this.currentPath) return;
     const defaultName = this.docName.replace(/\.(md|markdown|mmd)$/i, "") + ".pdf";
-    const savePath = await save({
+    const picked = await save({
       defaultPath: defaultName,
       filters: [{ name: "PDF", extensions: ["pdf"] }],
     });
-    if (!savePath) return;
+    if (!picked) return;
+    const savePath = slashed(picked);
     await this.#enterPrintLayout();
     try {
       await invoke("print_document", { savePath });
@@ -1433,7 +1435,7 @@ class AppState {
             onClick: () => openPath(savePath).catch((e) => toast.error(`Could not open PDF: ${e}`)),
           },
           cancel: {
-            label: "Show in Finder",
+            label: `Show in ${fileManager}`,
             onClick: () => revealItemInDir(savePath).catch((e) => toast.error(`${e}`)),
           },
         });

@@ -4,36 +4,37 @@
  * custom properties on the root element; "theme" values remove the property
  * so the active theme's own defaults show through.
  *
- * Typefaces are macOS system fonts, so nothing has to be downloaded and the
- * app stays offline.
+ * Typefaces are system fonts, so nothing has to be downloaded and the app
+ * stays offline. macOS has them all; on Windows each falls back to the
+ * closest font Windows ships (Segoe UI, Georgia, Palatino Linotype).
  */
 
 export const TYPEFACES = {
   theme: { label: "Theme", body: null, heading: null },
   sans: {
     label: "San Francisco",
-    body: `-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif`,
-    heading: `-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif`,
+    body: `-apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif`,
+    heading: `-apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif`,
   },
   newyork: {
     label: "New York",
     body: `ui-serif, "New York", Georgia, serif`,
-    heading: `-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif`,
+    heading: `-apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif`,
   },
   charter: {
     label: "Charter",
     body: `Charter, "Bitstream Charter", Georgia, serif`,
-    heading: `"Avenir Next", Avenir, -apple-system, sans-serif`,
+    heading: `"Avenir Next", Avenir, -apple-system, "Segoe UI", sans-serif`,
   },
   iowan: {
     label: "Iowan",
-    body: `"Iowan Old Style", Palatino, Georgia, serif`,
-    heading: `"Iowan Old Style", Palatino, Georgia, serif`,
+    body: `"Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif`,
+    heading: `"Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif`,
   },
   avenir: {
     label: "Avenir",
-    body: `"Avenir Next", Avenir, -apple-system, sans-serif`,
-    heading: `"Avenir Next", Avenir, -apple-system, sans-serif`,
+    body: `"Avenir Next", Avenir, -apple-system, "Segoe UI", sans-serif`,
+    heading: `"Avenir Next", Avenir, -apple-system, "Segoe UI", sans-serif`,
   },
 } as const;
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { fileManager } from "$lib/platform";
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { toast } from "svelte-sonner";
   import { app } from "$lib/state.svelte";
@@ -52,7 +53,7 @@
           </Button>
         {/snippet}
       </Tooltip.Trigger>
-      <Tooltip.Content>Show in Finder</Tooltip.Content>
+      <Tooltip.Content>Show in {fileManager}</Tooltip.Content>
     </Tooltip.Root>
   {/snippet}
 </ZoomViewer>

@@ -136,6 +136,17 @@ xattr -cr /Applications/Inky.app
 (To ship without that caveat you'd need an Apple Developer account and
 notarization — `tauri build` supports it via the `APPLE_*` signing env vars.)
 
+### Windows
+
+The same code builds a Windows installer (`Inky_<version>_x64-setup.exe`,
+NSIS, installs per user without admin rights). Build it on a Windows machine
+with `pnpm bundle`, or in CI: **Actions → Release → Run workflow** builds both
+platforms and attaches the installers to the run; a `v*` tag also publishes
+them in the release, with a `latest.json` covering both platforms.
+
+The installer is not code-signed, so SmartScreen warns on first run
+(**More info → Run anyway**). The `inky` shell command is macOS-only.
+
 ### Auto-updates
 
 The app checks for updates on launch (silently) and via **Inky → Check for

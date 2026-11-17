@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { modKey, shortcut } from "$lib/platform";
   import { onMount, tick, untrack } from "svelte";
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { app, type CommentDraft } from "$lib/state.svelte";
@@ -652,7 +653,7 @@
       } else if (
         (ev.key === "ArrowDown" || ev.key === "ArrowUp") &&
         !ev.shiftKey &&
-        !ev.metaKey &&
+        !modKey(ev) &&
         !ev.altKey
       ) {
         const dir = ev.key === "ArrowDown" ? 1 : -1;
@@ -1538,8 +1539,8 @@
       onmousedown={(e) => e.preventDefault()}
     >
       {#each [
-        { icon: Bold, title: "Bold (⌘B)", action: () => execCmd("bold") },
-        { icon: Italic, title: "Italic (⌘I)", action: () => execCmd("italic") },
+        { icon: Bold, title: shortcut("Bold (⌘B)"), action: () => execCmd("bold") },
+        { icon: Italic, title: shortcut("Italic (⌘I)"), action: () => execCmd("italic") },
         { icon: Strikethrough, title: "Strikethrough", action: () => execCmd("strikethrough") },
         { icon: Code, title: "Inline code", action: toggleInlineCode },
       ] as b (b.title)}
