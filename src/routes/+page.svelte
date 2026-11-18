@@ -8,6 +8,7 @@
   import { pinchScale } from "$lib/zoom";
   import type { ReadingWidth } from "$lib/state.svelte";
   import Toolbar from "$lib/components/Toolbar.svelte";
+  import TabBar from "$lib/components/TabBar.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import Editor from "$lib/components/Editor.svelte";
   import Preview from "$lib/components/Preview.svelte";
@@ -261,7 +262,11 @@
       </div>
     {/if}
 
-    <main class="print-root relative min-w-0 flex-1">
+    <main class="print-root flex min-w-0 flex-1 flex-col">
+      {#if app.tabs.length >= 2 && !app.focusMode}
+        <TabBar />
+      {/if}
+      <div class="print-root relative min-h-0 flex-1">
       <SearchBar />
       {#if app.imagePath}
         <ImagePreview />
@@ -310,6 +315,7 @@
           <Preview />
         {/key}
       {/if}
+      </div>
     </main>
 
     {#if ready && app.currentPath && app.commentsVisible && !app.isMermaidDoc}

@@ -1367,7 +1367,7 @@
       // Never let a link navigate the webview itself (that's how you end up
       // on an unescapable 404 page).
       event.preventDefault();
-      handleLink(anchor.getAttribute("href") ?? "");
+      handleLink(anchor.getAttribute("href") ?? "", event.metaKey);
       return;
     }
     const media = (event.target as HTMLElement).closest<Element>("img, .mermaid-block svg");
@@ -1409,7 +1409,7 @@
     app.openMedia(items, Math.max(0, els.indexOf(clicked)));
   }
 
-  async function handleLink(href: string) {
+  async function handleLink(href: string, background = false) {
     if (!href) return;
     if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
       // External scheme (https, mailto, …) → the user's default apps.
@@ -1435,7 +1435,8 @@
     })
       .then(async ({ path, doc }) => {
         if (doc) {
-          app.openDoc(path);
+          if (background) app.openInTab(path, { background: true });
+          else app.openDoc(path);
         } else {
           const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
           revealItemInDir(path);

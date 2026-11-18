@@ -84,7 +84,7 @@
     const doc = results[selected];
     if (!doc) return;
     if (doc.recent) app.openRecent(doc.path);
-    else app.openDoc(doc.path);
+    else app.openInTab(doc.path);
     close();
   }
 

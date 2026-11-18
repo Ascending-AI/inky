@@ -129,7 +129,12 @@
     {:else}
       <DropdownMenu.Item
         class={node.path === app.currentPath ? "font-medium" : ""}
-        onclick={() => app.openDoc(node.path)}
+        onclick={(e) => app.openInTab(node.path, { background: e.metaKey })}
+        onauxclick={(e) => {
+          if (e.button !== 1) return;
+          e.preventDefault();
+          app.openInTab(node.path, { background: true });
+        }}
       >
         <FileText class="size-4 opacity-60" />
         <span class="truncate">{node.name.replace(/\.(md|markdown|mmd)$/i, "")}</span>

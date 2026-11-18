@@ -33,14 +33,20 @@
 
   const DRAG_TYPE = "application/x-inky-path";
 
-  function activate() {
+  function activate(e?: MouseEvent) {
     if (node.isDir) {
       app.setExpanded(node.path, !expanded);
     } else if (isImage) {
       app.openImage(node.path);
     } else {
-      app.openDoc(node.path);
+      app.openInTab(node.path, { background: !!e?.metaKey });
     }
+  }
+
+  function onauxclick(e: MouseEvent) {
+    if (e.button !== 1 || node.isDir || isImage) return;
+    e.preventDefault();
+    app.openInTab(node.path, { background: true });
   }
 
   function ondragstart(e: DragEvent) {
@@ -90,6 +96,7 @@
           {dropHover ? 'ring-2 ring-ring ring-inset bg-accent/40' : ''}"
         style="padding-left: {8 + depth * 14}px; {node.hidden ? 'opacity: 0.5' : ''}"
         onclick={activate}
+        {onauxclick}
         title={node.name}
       >
         {#if node.isDir}

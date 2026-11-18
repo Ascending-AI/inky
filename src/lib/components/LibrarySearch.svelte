@@ -69,7 +69,7 @@
 
   async function openHit(hit: Hit) {
     close();
-    await app.openDoc(hit.path);
+    await app.openInTab(hit.path);
     // Hand the query to the in-document search for highlights + navigation.
     app.pendingSearchQuery = query.trim();
     app.searchOpen = true;
