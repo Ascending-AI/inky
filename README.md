@@ -1,184 +1,182 @@
 # Inky 🖋️
 
-A small, pleasant macOS app for reading and writing markdown. Built with
-Tauri 2, Svelte 5, Tailwind CSS 4 and shadcn-svelte.
+A small, pleasant macOS app for reading and writing Markdown. It's built for long
+documents (including the long research reports AI agents write) and lets those
+agents work in your library directly through a built-in MCP server.
 
 ![Inky](src-tauri/icons/128x128.png)
 
-## Features
+Your documents stay plain `.md` files in a folder you choose. There's no
+database, no account, and nothing leaves your Mac.
 
-### Library
+- [Install](#install)
+- [Features](#features)
+- [Connect an agent (MCP)](#connect-an-agent-mcp)
+- [Keyboard shortcuts](#keyboard-shortcuts)
+- [Files Inky keeps](#files-inky-keeps)
+- [Development](#development)
+- [Releasing](#releasing)
 
-- Documents live as plain `.md` files in `~/Documents/Inky` (changeable via
-  *… → Change library folder*) — no database, no lock-in.
-- Folders, rename (right-click, the row's `…` button, or just click the
-  title in the toolbar), move to Trash, reveal in Finder.
-- Drag & drop documents and folders between folders; drop on empty sidebar
-  space to move to the library root.
-- **Quick open** — ⌘K fuzzy-finds any document.
-- **Paste as document** — copy markdown anywhere, hit ⌘⇧V and it becomes a
-  new document. Pasted mermaid source is detected and saved as a diagram.
+## Install
 
-### Reading & writing
+Download the latest `Inky_<version>_aarch64.dmg` from
+[Releases](https://github.com/Ascending-AI/inky/releases) and drag Inky into
+Applications. It needs an Apple-silicon Mac.
 
-- **Three views** — Reading (⌘1), Split (⌘2), Writing (⌘3) with a CodeMirror
-  markdown editor and live preview. Changes autosave; live word count and
-  reading time sit next to the title.
-- **Edit while reading** — click into any paragraph, heading or list in
-  reading view and just type: the block stays rendered (no markdown syntax)
-  with a floating bar for bold/italic/strike/code, headings, lists and
-  quotes. Click away or ⌘↩ applies, Esc cancels. Code blocks edit their code
-  in place (fences stay hidden); math and footnote blocks fall back to
-  source editing.
-- **Split-view scroll sync** — editor and preview scroll together; toggle it
-  from the toolbar or the View menu.
-- **Table of contents** — ⌘T opens a right-hand panel listing every heading;
-  click to jump (in any view), and the current section stays highlighted
-  while you scroll.
-- **Find in document** — ⌘F with match highlighting and next/previous
-  navigation, in both the preview and the editor.
-- **Focus mode** — ⌘⇧F hides everything but the editor and dims all but the
-  paragraph you're writing.
-- **Themes** — Light, Dark (anthracite, not black), and Book (warm paper +
-  serif typography).
-- **Reading settings** — the `Aa` popover adjusts font size (Kindle-style
-  steps, 85–170%) and text column width (Default → Full in five steps); both
-  persist and apply to the editor as well as the preview.
-- Sidebar, TOC and comments panels are drag-resizable.
-
-### Comments
-
-- Select text in reading or writing mode and click **Comment** to start a
-  thread — your questions and ideas, Google-Docs style.
-- Reply to threads, **resolve/reopen** them, delete them; filter the panel
-  (⌘⇧C) by **All / Open / Resolved**.
-- Open threads highlight their text in both preview and editor; hover a
-  highlight for a preview card, click it to open the thread.
-- Comments are anchored to the quoted text plus context, so they survive
-  edits elsewhere; if the text is deleted the thread is kept and flagged.
-- Stored in a hidden sidecar (`.«name».comments.json`) next to each document
-  — your markdown stays clean, and rename/move/trash carries comments along.
-
-### Rendering
-
-- **Mermaid** — ` ```mermaid ` fences render inside documents; `.mmd` files
-  render as standalone diagrams.
-- **Math & footnotes** — KaTeX (`$…$`, `$$…$$`) and GFM-style footnotes
-  (`[^1]`).
-- **Local images** — relative image paths render in the preview; pasting an
-  image into the editor saves it to an `assets/` folder next to the document
-  and inserts the link.
-- **PDF export** — ⌘E writes a PDF through a native macOS print operation
-  with proper page margins and document-natural type, regardless of theme or
-  reading settings; ⌘P opens the print dialog.
-- **Copy** — the markdown source or the rendered HTML.
-
-### App
-
-- **Native menu bar** — File/Edit/View menus cover documents, export,
-  themes, text width, font size and view toggles with standard shortcuts.
-- **Auto-updates** — checks on launch and via *Inky → Check for Updates…*
-  (see below).
-- **MCP server** — agents can read and write your library through Inky's
-  built-in MCP server (see below). Nothing to install: toggle it from the
-  toolbar's red/green **MCP** status light, or point stdio clients at
-  `Inky --mcp`.
-- **Safety & history** — unsaved changes are flushed on window blur, close,
-  and ⌘Q; every content-changing overwrite keeps the previous version in a
-  hidden `.inky-history/` folder next to the document (max one per 10
-  minutes, last 20 kept). *… → Version history* (or File → Version History…)
-  shows each snapshot with a colored diff against the current document and
-  one-click restore — restoring snapshots the replaced version too, so it's
-  always reversible. Edits that collide with on-disk changes warn instead of
-  silently losing either side. Single-instance guard and window-state
-  restore included.
-
-## Development
-
-Prerequisites: Rust (stable), Node 20+, pnpm.
-
-```sh
-pnpm install
-make dev
-```
-
-## Packaging (share with friends)
-
-Common actions live in the Makefile — run `make` (or `make help`) to list them:
-
-| Target | What it does |
-| --- | --- |
-| `make dev` | Run the app with hot reload |
-| `make check` | Type-check frontend + Rust, run the Rust tests |
-| `make dmg` | Build the signed `.app`, `.dmg` and updater artifacts |
-| `make release` | `make dmg` + assemble `dist/release/` ready for a GitHub release (incl. `latest.json`) |
-| `make icons` | Regenerate all app icons from `assets/icon.svg` |
-| `make open` | Open the last built release app |
-| `make mcp` | Run the MCP server on stdio (dev build) |
-| `make clean` | Remove build outputs |
-
-Builds are signed with `~/.tauri/inky.key` (override with `make dmg KEY=…`);
-plain `pnpm tauri build` fails now that updater artifacts are enabled
-(`pnpm bundle` still works as an alias for `make dmg`).
-
-`make dmg` produces:
-
-- `src-tauri/target/release/bundle/macos/Inky.app`
-- `src-tauri/target/release/bundle/dmg/Inky_<version>_aarch64.dmg`
-
-Send the `.dmg`. Since the app is not notarized with an Apple Developer ID,
-the first launch on a friend's Mac requires either **right-click → Open**, or:
+The app is signed for updates but not notarized by Apple, so the first launch
+needs **right-click → Open**, or:
 
 ```sh
 xattr -cr /Applications/Inky.app
 ```
 
-(To ship without that caveat you'd need an Apple Developer account and
-notarization — `tauri build` supports it via the `APPLE_*` signing env vars.)
+Inky checks for updates on launch and from **Inky → Check for Updates…**.
 
-### Auto-updates
+## Features
 
-The app checks for updates on launch (silently) and via **Inky → Check for
-Updates…**. The updater endpoint in `src-tauri/tauri.conf.json` points at the
-latest GitHub release of `Ascending-AI/inky`. Shipping an update:
+### Library
 
-1. Bump `version` in `src-tauri/tauri.conf.json` and commit.
-2. `git tag v<version> && git push --tags` — CI
-   (`.github/workflows/release.yml`) builds, signs, and publishes the release
-   automatically. (`make release` still works for a manual, local release.)
-3. Existing installs pick it up on next launch.
+- Documents live in `~/Documents/Inky` by default (**… → Change library
+  folder…**). Inky watches the folder, so files that agents or other apps
+  write show up right away.
+- Folders, drag-and-drop moves, rename (right-click, or click the title in
+  the toolbar), and delete with **Undo** (then to the Trash).
+- **Quick Open** (⌘K) fuzzy-finds documents and recent files.
+  **Search Library** (⌘⇧K) searches every document's text.
+- **Breadcrumbs** in the toolbar show the folder path; each crumb lists that
+  folder's documents.
+- **Paste as document** (⌘⇧V) turns copied Markdown into a new document.
+  Pasted Mermaid source becomes a diagram.
+- **Images** in the library appear in the sidebar and open in a viewer.
+- **`.inkyignore`** hides clutter from the sidebar, search and agents. It
+  uses `.gitignore` syntax. **Hide from Inky** in an item's menu writes the
+  rule for you, and the sidebar's eye button shows hidden items.
 
-Updates are signed with `~/.tauri/inky.key` (mirrored in the repo's
-`TAURI_SIGNING_PRIVATE_KEY` Actions secret) — back that file up; without it
-you can't ship updates to existing installs.
+### Opening files from anywhere
 
-## MCP server (let agents use your library)
+- Open any Markdown file or folder from Finder, **File → Open…** (⌘O),
+  **Open Folder…** (⌘⇧O), **Open Recent**, or the terminal. An opened folder
+  temporarily replaces the library in the sidebar.
+- **Inky → Install 'inky' Command in PATH…** adds `inky notes.md` and
+  `inky ~/project` to your terminal.
+- If a file outside the library changes on disk while you have unsaved
+  edits, Inky asks before overwriting it.
 
-Inky ships an MCP server inside the app binary — no Node.js or other runtime
-needed. It exposes `list_documents`, `read_document`, `write_document`,
-`patch_document`, `rename_document`, `move_document`, `create_folder`,
-`delete_document`, `search_documents`, history tools (`list_versions`,
-`read_version`) and comment tools (`list_comments`, `create_comment`,
-`reply_to_comment`, `resolve_comment`), `open_document` (shows a document in
-the Inky app), plus every document as an
-`inky://doc/…` resource. The library folder is resolved from `INKY_LIBRARY`,
-then the app's config (`~/Library/Application Support/com.inky.app/config.json`),
-then `~/Documents/Inky` — so the app and agents always see the same documents.
-The app refreshes on focus, so agent-created documents just show up.
+### Reading
 
-Two ways to connect (right-click the toolbar's **MCP** light for copyable,
-pre-filled snippets):
+- **Resume where you left off.** Each document reopens at your last
+  position, and a thin bar shows your progress.
+- **What changed since you last read it.** After an agent (or anyone)
+  edits a document, margin marks show edited (amber), new (green) and removed
+  (red) passages. Click a mark to see the earlier text. A banner counts the
+  changes, steps through them and marks the document as read.
+- **Hover previews.** Footnotes show their text. Links show the target
+  section or document. External links show their address without being
+  fetched. Clicking a footnote card opens the source it cites.
+- **Highlights.** Select text and pick one of six fluorescent colours (H
+  reuses the last one). You can add a note to a highlight, recolour it or
+  remove it. The **Highlights** panel lists them for one document or all,
+  filters by colour and copies them as Markdown.
+- **Zoom images and diagrams.** Click one to open a viewer with
+  wheel/pinch zoom, panning, and arrow keys through the document's figures.
+- **Table of contents** (⌘T) with the current section highlighted.
+  **Back/Forward** (⌘[ / ⌘]) between documents.
+- **Reading settings** (the `Aa` popover) control font size, text width,
+  typeface (San Francisco, New York, Charter, Iowan, Avenir), line and
+  paragraph spacing, and a justified, hyphenated book layout. Pinch to zoom
+  the text.
+- **Themes**: Light, Dark (anthracite, not black) and Book (warm paper and
+  serif type).
 
-**HTTP** — the toolbar light runs a streamable-HTTP server on
-`http://127.0.0.1:26317/mcp` while the app is open (green = live; it
-restarts on the next launch until you stop it):
+### Writing
+
+- **Three views**: Reading (⌘1), Split (⌘2) with synced scrolling, and
+  Writing (⌘3), a CodeMirror Markdown editor. Changes autosave. Word count
+  and reading time sit next to the title.
+- **Edit while reading.** Double-click any paragraph, heading or list and
+  type. The block stays rendered, and a floating bar offers formatting.
+  ⌘↩ or clicking away applies the edit; Esc cancels. Only the text you
+  changed is written back, so the rest of the Markdown stays exactly as it
+  was.
+- **Task checkboxes** toggle with a click in the reading view.
+- **Focus mode** (⌘⇧F) hides everything but the editor and dims all but the
+  current paragraph.
+- **Find** (⌘F) works in both the preview and the editor.
+- **Pasted images** are saved to an `assets/` folder next to the document
+  and linked.
+
+### Comments
+
+- Select text and click **Comment** to start a thread. Threads can be
+  replied to, resolved, reopened and filtered (⌘⇧C: All / Open / Resolved).
+- Comments are anchored to the quoted text and its surroundings, so they
+  survive edits elsewhere. If the text is deleted, the thread is kept and
+  flagged.
+- Agents can read and answer comments too (see [MCP](#connect-an-agent-mcp)).
+
+### Rendering
+
+- **Mermaid** diagrams in ` ```mermaid ` blocks, and `.mmd` files as
+  standalone diagrams.
+- **Math** with KaTeX: `$…$` inline, `$$…$$` display. Dollar amounts stay
+  plain text.
+- GFM tables, footnotes, task lists and syntax-highlighted code.
+- **PDF export** (⌘E) uses clean print typography whatever your theme.
+  **Print** is ⌘P. You can also copy the Markdown source or the rendered HTML.
+
+### Never losing work
+
+- **Safe saves.** Writes are atomic, and Inky never writes over a file that
+  changed since it loaded it. Changes on disk are merged with your unsaved
+  edits block by block. If you both changed the same passage, a dialog lets
+  you keep both, take theirs or keep yours.
+- **Version history** (⌘Y). The previous version of a document is kept
+  before each overwrite (at most one per 10 minutes, the last 20). Each
+  version shows a coloured diff and can be restored in one click. Versions
+  written by agents are badged **agent**.
+- Unsaved changes are flushed when the window loses focus or closes, and on ⌘Q.
+
+### Privacy and security
+
+- Remote images in documents are blocked by default, because they can be
+  used to track when you read something. A pill offers **Load** (this
+  document) or **Always**, and Reading settings switch it back.
+- Documents can't run scripts, embed frames or restyle the app.
+- The MCP server listens only on your Mac and requires a secret token.
+
+## Connect an agent (MCP)
+
+Inky has an MCP server built into the app, so you don't need Node.js or any
+other runtime. Agents get these tools:
+
+- **Documents**: `list_documents`, `read_document`, `write_document`,
+  `patch_document`, `rename_document`, `move_document`, `create_folder`,
+  `delete_document`, `search_documents`
+- **History**: `list_versions`, `read_version`
+- **Comments**: `list_comments`, `create_comment`, `reply_to_comment`,
+  `resolve_comment`
+- **App**: `open_document`, which shows a document in the Inky window
+
+Every document is also available as an `inky://doc/…` resource. Agents see the
+same library as the app: `INKY_LIBRARY` if set, otherwise the folder chosen in
+the app, otherwise `~/Documents/Inky`.
+
+**The easy way:** right-click the **MCP** light in the toolbar. The **Connect
+an agent** window has ready-to-copy commands for Claude Code, Claude Desktop
+and Codex, with your token filled in.
+
+**HTTP** (while Inky is running). Click the MCP light to start the server
+(green means it's live). It listens on `http://127.0.0.1:26317/mcp` and stays
+on across launches until you stop it. Requests need the token from the Connect
+window:
 
 ```sh
-claude mcp add --transport http inky http://127.0.0.1:26317/mcp
+claude mcp add --transport http inky http://127.0.0.1:26317/mcp \
+  --header "Authorization: Bearer <token>"
 ```
 
-**stdio** — any client that takes a `command` can launch the binary directly,
-even when Inky isn't running:
+**stdio** (works even when Inky isn't running). The client launches the app
+binary in server mode:
 
 ```sh
 claude mcp add inky -- "/Applications/Inky.app/Contents/MacOS/Inky" --mcp
@@ -194,32 +192,102 @@ Codex (`~/.codex/config.toml`):
 
 ```toml
 [mcp_servers.inky]
-command = "/Applications/Inky.app/Contents/MacOS/Inky"
+command = '/Applications/Inky.app/Contents/MacOS/Inky'
 args = ["--mcp"]
 ```
 
 ChatGPT's connectors only accept public HTTPS URLs, so they can't reach a
-server on your Mac; Inky doesn't support ChatGPT.
+server on your Mac.
 
-This repo's `.mcp.json` registers the HTTP server, so Claude Code sessions
-opened here use the running app. Then ask an agent things like *"write
-yesterday's meeting notes into my Inky library under Meetings/"* or *"read my
-Inky doc 'Ideas' and summarize it"*.
+Then ask things like *"write yesterday's meeting notes into my Inky library
+under Meetings/"* or *"read my Inky doc 'Ideas', answer the open comments and
+show it to me"*.
 
 ## Keyboard shortcuts
 
 | Shortcut | Action |
 | --- | --- |
 | ⌘N | New document |
-| ⌘K | Quick open |
+| ⌘O / ⌘⇧O | Open file / Open folder |
+| ⌘K | Quick Open |
+| ⌘⇧K | Search library |
 | ⌘S | Save (autosave also runs) |
+| ⌘Y | Version history |
 | ⌘E | Export PDF |
 | ⌘P | Print |
-| ⌘⇧V | Paste clipboard as new document |
+| ⌘⇧V | New document from clipboard |
 | ⌘1 / ⌘2 / ⌘3 | Reading / Split / Writing view |
+| ⌘[ / ⌘] | Back / Forward |
 | ⌘F | Find in document |
+| ⌘T | Table of contents |
+| ⌘⇧C | Comments |
+| ⌘B or ⌘\ | Sidebar |
 | ⌘⇧F | Focus mode |
-| ⌘⇧C | Toggle comments |
-| ⌘T | Toggle table of contents |
-| ⌘B (or ⌘\) | Toggle sidebar |
 | ⌘+ / ⌘− | Font size |
+| Double-click | Edit a block in the reading view (⌘↩ apply, Esc cancel) |
+| H | Highlight the selection in the last colour |
+| ⌘Q | Save and quit |
+
+## Files Inky keeps
+
+Inside your library, next to each document:
+
+| File | What it is |
+| --- | --- |
+| `.«name».comments.json` | The document's comment threads. Moves, renames and deletes carry it along. |
+| `.inky-history/` | Earlier versions, for Version history |
+| `.inkyignore` | Your hide rules (optional, any folder) |
+| `assets/` | Images pasted into documents |
+
+In `~/Library/Application Support/com.inky.app/`: `config.json` (library
+folder, recent files, MCP token), `highlights.json`, and `read-baselines/` (the
+"last read" copies behind *What changed*).
+
+## Development
+
+You need Rust (stable), Node 20+ and pnpm.
+
+```sh
+pnpm install
+make dev
+```
+
+The frontend is SvelteKit with Svelte 5, Tailwind CSS 4 and shadcn-svelte. The
+backend is Tauri 2 and Rust; the MCP server is `src-tauri/src/mcp.rs`. Run
+`make` to list the tasks:
+
+| Target | What it does |
+| --- | --- |
+| `make dev` | Run the app with hot reload |
+| `make check` | Type-check the frontend and Rust, run the Rust tests (`pnpm test` runs the frontend tests) |
+| `make dmg` | Build the signed `.app`, `.dmg` and updater artifacts |
+| `make release` | `make dmg`, then assemble `dist/release/` for a GitHub release (with `latest.json`) |
+| `make icons` | Regenerate all app icons from `assets/icon.svg` |
+| `make open` | Open the last built app |
+| `make mcp` | Run the MCP server on stdio (dev build) |
+| `make clean` | Remove build outputs |
+
+Builds are signed with `~/.tauri/inky.key` (override with `make dmg KEY=…`).
+Plain `pnpm tauri build` fails without it; `pnpm bundle` is an alias for
+`make dmg`.
+
+To use the running app from Claude Code sessions in this repo, `.mcp.json`
+reads the token from an environment variable:
+
+```sh
+export INKY_MCP_TOKEN=<token from the Connect an agent window>
+```
+
+## Releasing
+
+1. Bump `version` in `src-tauri/tauri.conf.json` and commit.
+2. Run `git tag v<version> && git push --tags`. CI
+   (`.github/workflows/release.yml`) builds, signs and publishes the release
+   with its `latest.json` update feed. (`make release` does the same
+   locally.)
+3. Existing installs pick the update up on their next launch.
+
+The updater reads `latest.json` from the latest release of
+`Ascending-AI/inky`. Updates are signed with `~/.tauri/inky.key`, which is
+mirrored in the repo's `TAURI_SIGNING_PRIVATE_KEY` Actions secret. **Back that
+file up:** without it you can't ship updates to existing installs.

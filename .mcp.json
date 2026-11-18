@@ -2,7 +2,10 @@
   "mcpServers": {
     "inky": {
       "type": "http",
-      "url": "http://127.0.0.1:26317/mcp"
+      "url": "http://127.0.0.1:26317/mcp",
+      "headers": {
+        "Authorization": "Bearer ${INKY_MCP_TOKEN:-}"
+      }
     }
   }
 }
