@@ -81,6 +81,11 @@ export function closeTab(set: TabSet, id: string): string | null {
   return set.active;
 }
 
+/** A save conflict pins the reader to the active tab until it is resolved. */
+export function canLeave(conflict: boolean, targetId: string, set: TabSet): boolean {
+  return !conflict || targetId === set.active;
+}
+
 /** The tab to activate when stepping from the active one, wrapping around. */
 export function cycleTab(set: TabSet, step: 1 | -1): string | null {
   const n = set.tabs.length;

@@ -15,3 +15,8 @@ export interface OpenRequest {
   kind: "file" | "folder";
   path: string;
 }
+
+/** An agent renamed, moved or deleted a file or folder (absolute paths). */
+export type PathChange =
+  | { kind: "moved"; from: string; to: string }
+  | { kind: "deleted"; path: string };

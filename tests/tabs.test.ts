@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addTab,
+  canLeave,
   closeTab,
   cycleTab,
   dropTabs,
@@ -139,5 +140,14 @@ describe("tab persistence", () => {
       active: 0,
     });
     expect(parseTabs('{"tabs":[],"active":0}', "/a.md").tabs).toEqual([]);
+  });
+
+  it("canLeave refuses to leave a conflicted tab", () => {
+    const set = setOf("/a", "/b");
+    const [a, b] = set.tabs;
+    set.active = a.id;
+    expect(canLeave(true, b.id, set)).toBe(false);
+    expect(canLeave(true, a.id, set)).toBe(true);
+    expect(canLeave(false, b.id, set)).toBe(true);
   });
 });

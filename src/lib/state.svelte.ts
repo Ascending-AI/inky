@@ -8,7 +8,7 @@ import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { toast } from "svelte-sonner";
 import { EditorView } from "@codemirror/view";
-import type { OpenRequest, ThemeName, TreeNode, ViewMode } from "./types";
+import type { OpenRequest, PathChange, ThemeName, TreeNode, ViewMode } from "./types";
 import { WELCOME_DOC, MERMAID_TEMPLATE } from "./templates";
 import { extractToc, type TocEntry } from "./markdown";
 import { isImagePath, isInside, parsePathList, remapPath } from "./paths";
@@ -45,6 +45,22 @@ import {
   type NavEntry,
 } from "./navhistory";
 import { FONT_SCALES, clampScale, stepScale } from "./zoom";
+import {
+  activeTab,
+  addTab,
+  canLeave,
+  closeTab as removeTab,
+  cycleTab,
+  dropTabs,
+  emptyTabs,
+  findTab,
+  moveTab as placeTab,
+  parseTabs,
+  remapTabs,
+  serializeTabs,
+  type Tab,
+  type TabSet,
+} from "./tabs";
 
 export type { CommentThread };
 export type CommentFilter = "all" | "open" | "resolved";
@@ -125,7 +141,15 @@ class AppState {
   mcpUrl = $state<string | null>(null);
   mcpSetupOpen = $state(false);
 
-  /** Back/forward between documents (link clicks, sidebar, quick open…). */
+  /**
+   * Open documents. Only the active tab is loaded: `currentPath`, `content`,
+   * `nav` and `viewMode` are its values, swapped in and out on a switch.
+   */
+  tabSet = $state<TabSet>(emptyTabs());
+  tabs = $derived(this.tabSet.tabs);
+  activeTabId = $derived(this.tabSet.active);
+
+  /** Back/forward between documents in the active tab (link clicks, sidebar…). */
   nav = $state(emptyHistory());
   canGoBack = $derived(this.nav.back.length > 0);
   canGoForward = $derived(this.nav.forward.length > 0);
@@ -295,6 +319,7 @@ class AppState {
       });
       await this.refreshTree();
     }
+    await this.#restoreTabs();
     if (pending.length > 0) {
       for (const req of pending) {
         try {
@@ -304,15 +329,19 @@ class AppState {
         }
       }
     } else if (welcome) {
-      await this.openDoc(welcome);
-    } else {
-      const last = localStorage.getItem("inky.lastDoc");
-      if (last) {
-        // Outside documents need re-granting; library ones pass straight through.
-        const resolved = await invoke<string>("open_recent", { path: last }).catch(() => last);
-        await this.openDoc(resolved, { silent: true });
-      }
+      await this.openInTab(welcome);
     }
+
+    listen<PathChange>("path-change", (e) => {
+      const c = e.payload;
+      if (c.kind === "moved") {
+        this.#pathMoved(c.from, c.to);
+      } else {
+        this.#pathDeleted(c.path);
+        // No Undo for an agent's delete: its highlights go now.
+        if (forgetInStore(this.highlightStore, c.path)) this.#saveHighlights();
+      }
+    });
 
     // Pick up documents created outside the app (e.g. via the MCP server).
     window.addEventListener("focus", () => this.syncFromDisk());
@@ -345,6 +374,31 @@ class AppState {
         toast.error("MCP server stopped unexpectedly");
       }
     }, 10_000);
+  }
+
+  /**
+   * Bring back last session's tabs and load the active one; a tab that won't
+   * load is dropped silently. Every tab is re-granted first (outside
+   * documents need it) so the first `set_open_tabs` keeps them all listed.
+   * Grants come only from Rust's own lists, never from localStorage.
+   */
+  async #restoreTabs() {
+    const raw = localStorage.getItem("inky.tabs");
+    const stored = parseTabs(raw, localStorage.getItem("inky.lastDoc"));
+    // Migrating `inky.lastDoc`: Rust has no tab list yet, but it was a
+    // recent, and it keeps the view the reader had.
+    const migrating = raw === null;
+    const grant = migrating ? "open_recent" : "restore_tab";
+    const set = emptyTabs();
+    const ids: string[] = [];
+    for (const { path, view } of stored.tabs) {
+      const granted = await invoke<string>(grant, { path }).catch(() => path);
+      ids.push(addTab(set, granted, migrating ? this.#defaultView() : view).tab.id);
+    }
+    set.active = ids[stored.active] ?? null;
+    this.tabSet = set;
+    if (this.tabSet.active) await this.#showActive({ quiet: true });
+    this.#persistTabs();
   }
 
   /** ⌘Q — save, then exit. */
@@ -422,6 +476,12 @@ class AppState {
       this.focusMode = false;
       this.#preFocus = null;
       this.syncMenuChecks();
+    }
+    // Focus mode only borrows the view; the tab keeps its own.
+    const tab = activeTab(this.tabSet);
+    if (tab && !this.focusMode) {
+      tab.view = mode;
+      this.#persistTabs();
     }
   }
 
@@ -746,7 +806,7 @@ class AppState {
 
   /** Show a highlight: open its document if needed, then scroll to it. */
   async revealHighlight(path: string, id: string) {
-    if (path !== this.currentPath && !(await this.openDoc(path))) return;
+    if (path !== this.currentPath && !(await this.openInTab(path))) return;
     if (this.viewMode === "editor") this.setViewMode("preview");
     this.focusHighlightId = id;
   }
@@ -772,7 +832,8 @@ class AppState {
     } else {
       this.focusMode = false;
       if (this.#preFocus) {
-        this.viewMode = this.#preFocus.viewMode;
+        // The tab may have changed while in focus mode; each keeps its view.
+        this.viewMode = activeTab(this.tabSet)?.view ?? this.#preFocus.viewMode;
         this.sidebarVisible = this.#preFocus.sidebar;
         this.tocVisible = this.#preFocus.toc;
         this.highlightsVisible = this.#preFocus.highlights;
@@ -829,23 +890,42 @@ class AppState {
   async movePath(path: string, targetDir: string) {
     try {
       const newPath = await invoke<string>("move_path", { path, targetDir });
-      renamePath(this.nav, path, newPath);
-      this.#remapExpanded(path, newPath);
-      if (this.imagePath) this.imagePath = remapPath(this.imagePath, path, newPath);
-      remapPositions(path, newPath);
-      if (remapStore(this.highlightStore, path, newPath)) this.#saveHighlights();
-      invoke("move_baseline", { from: path, to: newPath }).catch(() => {});
-      if (this.currentPath === path) {
-        this.currentPath = newPath;
-        localStorage.setItem("inky.lastDoc", newPath);
-      } else if (this.currentPath?.startsWith(path + "/")) {
-        this.currentPath = newPath + this.currentPath.slice(path.length);
-        localStorage.setItem("inky.lastDoc", this.currentPath);
-      }
-      await this.refreshTree();
+      await this.#pathMoved(path, newPath);
     } catch (e) {
       toast.error(`Move failed: ${e}`);
     }
+  }
+
+  /** A file or folder was renamed or moved (in the app or by an agent). */
+  async #pathMoved(from: string, to: string) {
+    if (from === to) return;
+    renamePath(this.nav, from, to);
+    this.#remapExpanded(from, to);
+    if (this.imagePath) this.imagePath = remapPath(this.imagePath, from, to);
+    remapPositions(from, to);
+    if (remapStore(this.highlightStore, from, to)) this.#saveHighlights();
+    invoke("move_baseline", { from, to }).catch(() => {});
+    if (this.currentPath && isInside(this.currentPath, from)) {
+      this.currentPath = remapPath(this.currentPath, from, to);
+      this.#showTitle();
+    }
+    if (remapTabs(this.tabSet, from, to)) this.#persistTabs();
+    await this.refreshTree();
+  }
+
+  /**
+   * A file or folder was deleted (in the app or by an agent): close its tabs
+   * and show the next one. Highlights are the caller's call (Undo).
+   */
+  async #pathDeleted(path: string) {
+    forgetPath(this.nav, path);
+    forgetPositions(path);
+    if (this.currentPath && isInside(this.currentPath, path)) this.closeDoc();
+    const count = this.tabSet.tabs.length;
+    const { activeClosed } = dropTabs(this.tabSet, path);
+    if (this.tabSet.tabs.length !== count) this.#persistTabs();
+    await this.refreshTree();
+    if (activeClosed) await this.#showActive();
   }
 
   async refreshTree() {
@@ -980,12 +1060,13 @@ class AppState {
   }
 
   /**
-   * Open a document. Unless `restoreScroll` is given (history navigation),
-   * the document being left is pushed onto the back stack.
+   * Open a document in the active tab (the first tab, if none is open).
+   * Unless `restoreScroll` is given (history navigation) or a tab is being
+   * shown (`fromTab`), the document being left is pushed onto the back stack.
    */
   async openDoc(
     path: string,
-    opts: { silent?: boolean; restoreScroll?: number } = {},
+    opts: { silent?: boolean; restoreScroll?: number; fromTab?: boolean } = {},
   ): Promise<boolean> {
     if (this.dirty) await this.save();
     // Saving surfaced a conflict: resolve it before leaving, or edits are lost.
@@ -993,7 +1074,7 @@ class AppState {
     const leaving = this.#here();
     try {
       const text = await invoke<string>("read_doc", { path });
-      if (opts.restoreScroll === undefined && leaving && leaving.path !== path) {
+      if (!opts.fromTab && opts.restoreScroll === undefined && leaving && leaving.path !== path) {
         recordVisit(this.nav, leaving);
       }
       // The Preview restores this once it has rendered; writing mode has no
@@ -1010,9 +1091,14 @@ class AppState {
       this.currentPath = path;
       this.content = text;
       this.savedContent = text;
+      // The active tab shows it now; with no tab open, this is the first.
+      if (!this.tabSet.active) addTab(this.tabSet, path, this.#preFocus?.viewMode ?? this.viewMode);
+      const tab = activeTab(this.tabSet)!;
+      tab.path = path;
+      tab.nav = this.nav;
+      this.#persistTabs();
       await this.#loadChanges(path, text);
-      localStorage.setItem("inky.lastDoc", path);
-      getCurrentWindow().setTitle(`${this.docName.replace(/\.(md|markdown|mmd)$/i, "")} — Inky`);
+      this.#showTitle();
       this.docSidecars = await invoke<boolean>("doc_sidecars", { path }).catch(() => false);
       if (!this.docSidecars) {
         this.commentsVisible = false;
@@ -1089,8 +1175,146 @@ class AppState {
     this.commentDraft = null;
     this.activeThreadId = null;
     this.docSidecars = true;
+    this.#showTitle();
+  }
+
+  /** The window title follows the loaded document. */
+  #showTitle() {
+    const stem = this.docName.replace(/\.(md|markdown|mmd)$/i, "");
+    getCurrentWindow().setTitle(this.currentPath ? `${stem} — Inky` : "Inky");
+  }
+
+  // --- tabs (see $lib/tabs) ---------------------------------------------------
+
+  /** View for a new tab: the one the reader last chose. */
+  #defaultView(): ViewMode {
+    return (localStorage.getItem("inky.viewMode") as ViewMode | null) ?? "split";
+  }
+
+  #persistTabs() {
+    localStorage.setItem("inky.tabs", serializeTabs(this.tabSet));
     localStorage.removeItem("inky.lastDoc");
-    getCurrentWindow().setTitle("Inky");
+    // Rust's copy is what may re-grant the outside ones after a relaunch.
+    invoke("set_open_tabs", { paths: this.tabSet.tabs.map((t) => t.path) }).catch(() => {});
+  }
+
+  /** Keep the active tab's place before it is left. */
+  #stashActive() {
+    const tab = activeTab(this.tabSet);
+    if (!tab) return;
+    if (tab.path === this.currentPath) tab.scroll = this.#here()?.scroll ?? null;
+    tab.nav = this.nav;
+    if (!this.focusMode) tab.view = this.viewMode;
+  }
+
+  /** Load a tab's document, with its history, view and place. */
+  async #loadTab(tab: Tab): Promise<boolean> {
+    this.nav = tab.nav;
+    // Focus mode stays in writing view; the tab's view returns when it ends.
+    if (!this.focusMode) this.viewMode = tab.view;
+    // No saved offset (just restored): the reading-position resume applies.
+    const opts = { fromTab: true, silent: true, restoreScroll: tab.scroll ?? undefined };
+    if (await this.openDoc(tab.path, opts)) return true;
+    // An outside document of a closed workspace, or from before a relaunch.
+    const granted = await invoke<string>("restore_tab", { path: tab.path }).catch(() => null);
+    return granted !== null && (await this.openDoc(granted, opts));
+  }
+
+  /**
+   * Load the active tab. One that can't be opened is dropped and the next
+   * active one tried, until one loads or none are left. True when the tab
+   * that was active to begin with loaded.
+   */
+  async #showActive({ quiet = false } = {}): Promise<boolean> {
+    const wanted = this.tabSet.active;
+    for (let tab = activeTab(this.tabSet); tab; tab = activeTab(this.tabSet)) {
+      if (await this.#loadTab(tab)) return tab.id === wanted;
+      if (!quiet) toast.error(`Could not open ${tab.path.split("/").pop()}`);
+      dropTabs(this.tabSet, tab.path);
+      this.#persistTabs();
+    }
+    this.closeDoc();
+    return false;
+  }
+
+  /** Switch to a tab; false when a save conflict holds the reader here, or it failed. */
+  async activateTab(id: string): Promise<boolean> {
+    if (id === this.tabSet.active) return true;
+    if (!this.tabSet.tabs.some((t) => t.id === id)) return false;
+    if (this.dirty) await this.save();
+    if (!canLeave(this.conflict !== null, id, this.tabSet)) return false;
+    this.#stashActive();
+    this.tabSet.active = id;
+    // Persisted by openDoc once it loads (or as tabs that fail are dropped).
+    return this.#showActive();
+  }
+
+  /**
+   * Open `path` in a new tab right after the active one, or focus the tab
+   * that already shows it. A background tab is only listed, not loaded.
+   */
+  async openInTab(path: string, opts: { background?: boolean } = {}): Promise<boolean> {
+    const found = findTab(this.tabSet, path);
+    if (found) return opts.background || this.activateTab(found.id);
+    if (opts.background && this.tabSet.active) {
+      addTab(this.tabSet, path, this.#defaultView(), { background: true });
+      this.#persistTabs();
+      return true;
+    }
+    if (this.dirty) await this.save();
+    if (this.conflict) return false;
+    const prev = { active: this.tabSet.active, nav: this.nav, view: this.viewMode };
+    this.#stashActive();
+    const { id } = addTab(this.tabSet, path, this.#defaultView()).tab;
+    const tab = activeTab(this.tabSet)!;
+    this.nav = tab.nav;
+    if (!this.focusMode) this.viewMode = tab.view;
+    // openDoc lists the tab once the document has loaded.
+    if (await this.openDoc(path, { fromTab: true })) return true;
+    // It didn't load: the tab goes, and the one before is still shown.
+    removeTab(this.tabSet, id);
+    this.tabSet.active = prev.active;
+    this.nav = prev.nav;
+    this.viewMode = prev.view;
+    return false;
+  }
+
+  async closeTab(id: string) {
+    const i = this.tabSet.tabs.findIndex((t) => t.id === id);
+    if (i < 0) return;
+    const closingActive = id === this.tabSet.active;
+    if (closingActive && this.dirty) await this.save();
+    // What shows afterwards: a neighbour, or the same tab for a background close.
+    const next = closingActive
+      ? ((this.tabSet.tabs[i + 1] ?? this.tabSet.tabs[i - 1])?.id ?? "")
+      : (this.tabSet.active ?? "");
+    if (!canLeave(this.conflict !== null, next, this.tabSet)) return;
+    removeTab(this.tabSet, id);
+    this.#persistTabs();
+    if (!closingActive) return;
+    if (this.tabSet.active) {
+      await this.#showActive();
+    } else {
+      // The last tab, and its history, are gone.
+      this.closeDoc();
+      this.nav = emptyHistory();
+    }
+  }
+
+  /** ⌘W: close the active tab, or the window when no tab is open. */
+  async closeActiveTab() {
+    if (this.tabSet.active) await this.closeTab(this.tabSet.active);
+    else await getCurrentWindow().close();
+  }
+
+  async cycleTabs(step: 1 | -1) {
+    const id = cycleTab(this.tabSet, step);
+    if (id) await this.activateTab(id);
+  }
+
+  moveTab(id: string, toIndex: number) {
+    placeTab(this.tabSet, id, toIndex);
+    this.#persistTabs();
   }
 
   /**
@@ -1203,7 +1427,7 @@ class AppState {
       await this.refreshTree();
       this.useTheirVersion();
       toast.success(`Your version was saved as ${copy.split("/").pop()}`, {
-        action: { label: "Open", onClick: () => this.openDoc(copy) },
+        action: { label: "Open", onClick: () => this.openInTab(copy) },
       });
     } catch (e) {
       toast.error(`Could not save a copy: ${e}`);
@@ -1280,7 +1504,7 @@ class AppState {
         content: isMermaid ? MERMAID_TEMPLATE : "# Untitled\n\n",
       });
       await this.refreshTree();
-      await this.openDoc(path);
+      await this.openInTab(path);
       return path;
     } catch (e) {
       toast.error(`Could not create document: ${e}`);
@@ -1300,23 +1524,7 @@ class AppState {
   async renamePath(path: string, newName: string) {
     try {
       const newPath = await invoke<string>("rename_path", { path, newName });
-      renamePath(this.nav, path, newPath);
-      this.#remapExpanded(path, newPath);
-      if (this.imagePath) this.imagePath = remapPath(this.imagePath, path, newPath);
-      remapPositions(path, newPath);
-      if (remapStore(this.highlightStore, path, newPath)) this.#saveHighlights();
-      invoke("move_baseline", { from: path, to: newPath }).catch(() => {});
-      if (this.currentPath === path) {
-        this.currentPath = newPath;
-        localStorage.setItem("inky.lastDoc", newPath);
-        getCurrentWindow().setTitle(
-          `${this.docName.replace(/\.(md|markdown|mmd)$/i, "")} — Inky`,
-        );
-      } else if (this.currentPath?.startsWith(path + "/")) {
-        this.currentPath = newPath + this.currentPath.slice(path.length);
-        localStorage.setItem("inky.lastDoc", this.currentPath);
-      }
-      await this.refreshTree();
+      await this.#pathMoved(path, newPath);
     } catch (e) {
       toast.error(`Rename failed: ${e}`);
     }
@@ -1336,17 +1544,12 @@ class AppState {
     const name = path.split("/").pop() ?? path;
     try {
       const token = await invoke<string | null>("delete_path", { path });
-      forgetPath(this.nav, path);
-      forgetPositions(path);
+      await this.#pathDeleted(path);
       // Highlights are the reader's own work: drop them only once the delete
       // is final, so Undo brings the document back with them.
       const forgetHighlights = () => {
         if (forgetInStore(this.highlightStore, path)) this.#saveHighlights();
       };
-      if (this.currentPath === path || this.currentPath?.startsWith(path + "/")) {
-        this.closeDoc();
-      }
-      await this.refreshTree();
       if (!token) {
         forgetHighlights();
         toast.success("Moved to Trash");
@@ -1408,7 +1611,7 @@ class AppState {
         content: text,
       });
       await this.refreshTree();
-      await this.openDoc(path);
+      await this.openInTab(path);
       toast.success("Clipboard pasted as new document");
     } catch (e) {
       toast.error(`Paste failed: ${e}`);
@@ -1490,7 +1693,7 @@ class AppState {
   async openRecent(path: string) {
     try {
       const resolved = await invoke<string>("open_recent", { path });
-      await this.openDoc(resolved);
+      await this.openInTab(resolved);
     } catch (e) {
       toast.error(`Could not open document: ${e}`);
     }
@@ -1502,13 +1705,13 @@ class AppState {
       this.sidebarVisible = true;
       await this.refreshTree();
     } else {
-      await this.openDoc(req.path);
+      await this.openInTab(req.path);
     }
     getCurrentWindow().setFocus().catch(() => {});
   }
 
   async closeWorkspace() {
-    await invoke("clear_workspace", { keep: this.currentPath });
+    await invoke("clear_workspace", { keep: this.tabSet.tabs.map((t) => t.path) });
     this.workspace = null;
     await this.refreshTree();
   }
@@ -1525,12 +1728,17 @@ class AppState {
   async chooseLibrary() {
     const dir = await open({ directory: true, defaultPath: this.libraryRoot });
     if (typeof dir !== "string") return;
+    // Every tab closes with the old library: nothing unsaved may go with it.
+    if (this.dirty) await this.save();
+    if (this.conflict) return;
     try {
-      await invoke("clear_workspace", { keep: null });
+      await invoke("clear_workspace", { keep: [] });
       this.workspace = null;
       this.libraryRoot = await invoke<string>("set_library_root", { path: dir });
+      this.tabSet = emptyTabs();
       this.closeDoc();
       this.nav = emptyHistory();
+      this.#persistTabs();
       await this.refreshTree();
       toast.success(`Library: ${dir}`);
     } catch (e) {
