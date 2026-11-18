@@ -134,9 +134,14 @@ impl Places {
     }
 
     /// `open_recent` / `restore_tab`: only paths in the persisted `listed`
-    /// paths; reachable ones pass through, outside ones are granted.
+    /// paths (as spelled, or the same file by another spelling, e.g. through a
+    /// symlink); reachable ones pass through, outside ones are granted.
     pub fn grant_listed(&mut self, library: &Library, listed: &[String], path: &str) -> Result<PathBuf, String> {
-        if !listed.iter().any(|r| r == path) {
+        let canonical = Path::new(path).canonicalize().ok();
+        let same = |r: &String| {
+            r == path || canonical.is_some() && Path::new(r).canonicalize().ok() == canonical
+        };
+        if !listed.iter().any(same) {
             return Err("Not a recent or open document".into());
         }
         if let Ok(place) = self.find(library, path) {
@@ -639,6 +644,19 @@ mod tests {
         assert!(places.files.is_empty(), "library paths pass through without a grant");
         assert_eq!(places.grant_listed(&f.library, &recent, &a).unwrap(), PathBuf::from(&a));
         assert!(places.find(&f.library, &a).is_ok());
+    }
+
+    #[test]
+    fn grant_listed_matches_a_symlinked_spelling() {
+        let f = fixture();
+        let link_dir = tempdir();
+        let link = link_dir.path().join("alias");
+        std::os::unix::fs::symlink(&f.outside, &link).unwrap();
+        let mut places = Places::default();
+        let listed = vec![s(&f.outside.join("a.md"))];
+        let via_link = s(&link.join("a.md"));
+        assert_eq!(places.grant_listed(&f.library, &listed, &via_link).unwrap(), f.outside.join("a.md"));
+        assert!(places.grant_listed(&f.library, &listed, &s(&link.join("b.md"))).is_err());
     }
 
     #[test]

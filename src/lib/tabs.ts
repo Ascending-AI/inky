@@ -81,7 +81,10 @@ export function closeTab(set: TabSet, id: string): string | null {
   return set.active;
 }
 
-/** A save conflict pins the reader to the active tab until it is resolved. */
+/**
+ * Edits that can't be left behind (a save conflict, or a save that failed)
+ * pin the reader to the active tab until they are dealt with.
+ */
 export function canLeave(conflict: boolean, targetId: string, set: TabSet): boolean {
   return !conflict || targetId === set.active;
 }
@@ -116,11 +119,14 @@ export function remapTabs(set: TabSet, from: string, to: string): boolean {
   return changed;
 }
 
-/** A file or folder was deleted: close tabs at or under it. */
-export function dropTabs(set: TabSet, path: string): { activeClosed: boolean } {
+/**
+ * A file or folder was deleted: close tabs at or under it, except `keep`
+ * (a tab whose unsaved edits stay open).
+ */
+export function dropTabs(set: TabSet, path: string, keep?: string): { activeClosed: boolean } {
   const activeIndex = set.tabs.findIndex((t) => t.id === set.active);
   const before = set.tabs;
-  const kept = before.filter((t) => !isInside(t.path, path));
+  const kept = before.filter((t) => t.id === keep || !isInside(t.path, path));
   for (const t of kept) forgetPath(t.nav, path);
   set.tabs = kept;
   const activeClosed = activeIndex >= 0 && !kept.some((t) => t.id === set.active);

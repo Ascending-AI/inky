@@ -107,6 +107,15 @@ describe("tab set", () => {
     expect(dropTabs(set, "/lib/R/a.md")).toEqual({ activeClosed: true });
     expect(set.tabs[0].nav.back).toEqual([]);
   });
+
+  it("dropTabs spares the tab that keeps unsaved edits", () => {
+    const set = setOf("/lib/R/a.md", "/lib/R/b.md", "/lib/c.md");
+    const keep = set.tabs[0].id;
+    set.active = keep;
+    expect(dropTabs(set, "/lib/R", keep)).toEqual({ activeClosed: false });
+    expect(order(set)).toEqual(["/lib/R/a.md", "/lib/c.md"]);
+    expect(set.active).toBe(keep);
+  });
 });
 
 describe("tab persistence", () => {

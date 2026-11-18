@@ -43,6 +43,7 @@ import {
   recordVisit,
   renamePath,
   type NavEntry,
+  type NavHistory,
 } from "./navhistory";
 import { FONT_SCALES, clampScale, stepScale } from "./zoom";
 import {
@@ -85,6 +86,26 @@ export const READING_WIDTHS = {
   full: { label: "Full", value: "100%" },
 } as const;
 export type ReadingWidth = keyof typeof READING_WIDTHS;
+
+interface OpenOptions {
+  silent?: boolean;
+  /** History navigation: restore this offset, record no visit. */
+  restoreScroll?: number;
+  /** Showing a tab: record no visit in its history. */
+  fromTab?: boolean;
+}
+
+/**
+ * How a load went. "blocked": a save conflict holds the open document.
+ * "superseded": a later load took over before this one finished.
+ */
+type Load = "loaded" | "failed" | "blocked" | "superseded";
+
+interface TabPlace {
+  active: string | null;
+  nav: NavHistory;
+  view: ViewMode;
+}
 
 export interface SearchBackend {
   /** Recompute matches for a query; returns the match count. */
@@ -304,11 +325,15 @@ class AppState {
     this.workspace = await invoke<string | null>("workspace_root").catch(() => null);
     await this.refreshTree();
 
-    // Listen before draining so nothing falls between the two.
+    // Listen before draining so nothing falls between the two. Requests wait
+    // until last session's tabs are back, then open after them, in order.
+    const queued: OpenRequest[] = [];
+    let restoring = true;
     await listen<OpenRequest>("open-request", (e) => {
-      this.handleOpenRequest(e.payload).catch((err) => toast.error(String(err)));
+      if (restoring) queued.push(e.payload);
+      else this.handleOpenRequest(e.payload).catch((err) => toast.error(String(err)));
     });
-    const pending = await invoke<OpenRequest[]>("take_pending_opens").catch(() => []);
+    queued.unshift(...(await invoke<OpenRequest[]>("take_pending_opens").catch(() => [])));
     let welcome: string | null = null;
     if (this.tree.length === 0 && !this.workspace) {
       welcome = await invoke<string>("create_doc", {
@@ -320,26 +345,23 @@ class AppState {
       await this.refreshTree();
     }
     await this.#restoreTabs();
-    if (pending.length > 0) {
-      for (const req of pending) {
-        try {
-          await this.handleOpenRequest(req);
-        } catch (err) {
-          toast.error(String(err));
-        }
+    const requested = queued.length > 0;
+    for (let req = queued.shift(); req; req = queued.shift()) {
+      try {
+        await this.handleOpenRequest(req);
+      } catch (err) {
+        toast.error(String(err));
       }
-    } else if (welcome) {
-      await this.openInTab(welcome);
     }
+    restoring = false;
+    if (!requested && welcome) await this.openInTab(welcome);
 
     listen<PathChange>("path-change", (e) => {
       const c = e.payload;
       if (c.kind === "moved") {
         this.#pathMoved(c.from, c.to);
       } else {
-        this.#pathDeleted(c.path);
-        // No Undo for an agent's delete: its highlights go now.
-        if (forgetInStore(this.highlightStore, c.path)) this.#saveHighlights();
+        this.#agentDeleted(c.path);
       }
     });
 
@@ -917,15 +939,39 @@ class AppState {
    * A file or folder was deleted (in the app or by an agent): close its tabs
    * and show the next one. Highlights are the caller's call (Undo).
    */
-  async #pathDeleted(path: string) {
+  async #pathDeleted(path: string, { keepEdits = false } = {}): Promise<Tab | null> {
+    const loaded = this.currentPath !== null && isInside(this.currentPath, path);
+    const active = activeTab(this.tabSet);
+    const keep =
+      keepEdits && loaded && this.dirty && active?.path === this.currentPath ? active : null;
     forgetPath(this.nav, path);
     forgetPositions(path);
-    if (this.currentPath && isInside(this.currentPath, path)) this.closeDoc();
+    if (loaded && !keep) this.closeDoc();
     const count = this.tabSet.tabs.length;
-    const { activeClosed } = dropTabs(this.tabSet, path);
+    const { activeClosed } = dropTabs(this.tabSet, path, keep?.id);
     if (this.tabSet.tabs.length !== count) this.#persistTabs();
     await this.refreshTree();
     if (activeClosed) await this.#showActive();
+    return keep;
+  }
+
+  /**
+   * An agent deleted a file or folder. Unsaved edits in the open document
+   * stay open (as when a file vanishes from disk): saving brings it back.
+   * There is no Undo, so other highlights go now.
+   */
+  async #agentDeleted(path: string) {
+    const kept = await this.#pathDeleted(path, { keepEdits: true });
+    const mine = kept ? this.highlightStore[kept.path] : undefined;
+    if (forgetInStore(this.highlightStore, path)) {
+      if (kept && mine) this.highlightStore[kept.path] = mine;
+      this.#saveHighlights();
+    }
+    if (kept) {
+      toast.warning(
+        `${kept.path.split("/").pop()} was deleted by an agent. Your unsaved edits are still open; save (⌘S) to keep them.`,
+      );
+    }
   }
 
   async refreshTree() {
@@ -1064,16 +1110,25 @@ class AppState {
    * Unless `restoreScroll` is given (history navigation) or a tab is being
    * shown (`fromTab`), the document being left is pushed onto the back stack.
    */
-  async openDoc(
-    path: string,
-    opts: { silent?: boolean; restoreScroll?: number; fromTab?: boolean } = {},
-  ): Promise<boolean> {
+  async openDoc(path: string, opts: OpenOptions = {}): Promise<boolean> {
+    return (await this.#open(path, opts)) === "loaded";
+  }
+
+  /** Bumped by every load; a load that sees a newer one gives way to it. */
+  #loadSeq = 0;
+
+  async #open(path: string, opts: OpenOptions = {}): Promise<Load> {
+    const seq = ++this.#loadSeq;
+    const superseded = () => seq !== this.#loadSeq;
     if (this.dirty) await this.save();
+    if (superseded()) return "superseded";
     // Saving surfaced a conflict: resolve it before leaving, or edits are lost.
-    if (this.conflict && path !== this.currentPath) return false;
+    if (this.conflict && path !== this.currentPath) return "blocked";
     const leaving = this.#here();
     try {
       const text = await invoke<string>("read_doc", { path });
+      // A later load took over while this one read: it owns the tab now.
+      if (superseded()) return "superseded";
       if (!opts.fromTab && opts.restoreScroll === undefined && leaving && leaving.path !== path) {
         recordVisit(this.nav, leaving);
       }
@@ -1099,7 +1154,10 @@ class AppState {
       this.#persistTabs();
       await this.#loadChanges(path, text);
       this.#showTitle();
-      this.docSidecars = await invoke<boolean>("doc_sidecars", { path }).catch(() => false);
+      const sidecars = await invoke<boolean>("doc_sidecars", { path }).catch(() => false);
+      // Another document was loaded meanwhile; the rest is its own.
+      if (this.currentPath !== path) return "superseded";
+      this.docSidecars = sidecars;
       if (!this.docSidecars) {
         this.commentsVisible = false;
         this.historyVisible = false;
@@ -1111,10 +1169,11 @@ class AppState {
         const top = opts.restoreScroll;
         requestAnimationFrame(() => (scrollDOM.scrollTop = top));
       }
-      return true;
+      return "loaded";
     } catch (e) {
+      if (superseded()) return "superseded";
       if (!opts.silent) toast.error(`Could not open document: ${e}`);
-      return false;
+      return "failed";
     }
   }
 
@@ -1151,12 +1210,13 @@ class AppState {
     const target = step(this.nav, here);
     if (!target) return;
     const restoreScroll = target.scroll;
-    if (await this.openDoc(target.path, { restoreScroll, silent: true })) return;
+    const done = (r: Load) => r === "loaded" || r === "superseded";
+    if (done(await this.#open(target.path, { restoreScroll, silent: true }))) return;
     // Outside documents of a closed workspace need re-granting (recents).
-    const regranted = await invoke<string>("open_recent", { path: target.path })
-      .then((p) => this.openDoc(p, { restoreScroll, silent: true }))
-      .catch(() => false);
-    if (regranted) return;
+    const seq = this.#loadSeq;
+    const regranted = await invoke<string>("open_recent", { path: target.path }).catch(() => null);
+    if (seq !== this.#loadSeq) return;
+    if (regranted && done(await this.#open(regranted, { restoreScroll, silent: true }))) return;
     // A target that can't be opened any more (deleted outside the app) is
     // dropped so the next press moves past it; we stay put, so un-record here.
     if (here) (step === goBack ? this.nav.forward : this.nav.back).pop();
@@ -1207,46 +1267,78 @@ class AppState {
     if (!this.focusMode) tab.view = this.viewMode;
   }
 
+  /**
+   * Save before leaving the open document. False when edits would be left
+   * behind: a conflict to resolve, or a save that didn't go through.
+   */
+  async #flush(): Promise<boolean> {
+    // A clean merge with someone else's change leaves the merged text to save.
+    for (let i = 0; i < 2 && this.dirty && !this.conflict; i++) await this.save();
+    return !this.dirty && !this.conflict;
+  }
+
+  /** The active tab with its history and view, to come back to. */
+  #place(): TabPlace {
+    return { active: this.tabSet.active, nav: this.nav, view: this.viewMode };
+  }
+
+  #returnTo(place: TabPlace) {
+    this.tabSet.active = place.active;
+    this.nav = place.nav;
+    this.viewMode = place.view;
+  }
+
   /** Load a tab's document, with its history, view and place. */
-  async #loadTab(tab: Tab): Promise<boolean> {
+  async #loadTab(tab: Tab): Promise<Load> {
+    // Never load over edits that still need the reader (openDoc would).
+    if (this.conflict) return "blocked";
     this.nav = tab.nav;
     // Focus mode stays in writing view; the tab's view returns when it ends.
     if (!this.focusMode) this.viewMode = tab.view;
     // No saved offset (just restored): the reading-position resume applies.
     const opts = { fromTab: true, silent: true, restoreScroll: tab.scroll ?? undefined };
-    if (await this.openDoc(tab.path, opts)) return true;
+    const first = await this.#open(tab.path, opts);
+    if (first !== "failed") return first;
     // An outside document of a closed workspace, or from before a relaunch.
+    const seq = this.#loadSeq;
     const granted = await invoke<string>("restore_tab", { path: tab.path }).catch(() => null);
-    return granted !== null && (await this.openDoc(granted, opts));
+    if (seq !== this.#loadSeq) return "superseded";
+    return granted === null ? "failed" : this.#open(granted, opts);
   }
 
   /**
    * Load the active tab. One that can't be opened is dropped and the next
-   * active one tried, until one loads or none are left. True when the tab
-   * that was active to begin with loaded.
+   * active one tried, until one loads or none are left. Says how it went for
+   * the tab that was active to begin with. A superseded or blocked load
+   * stops here and drops nothing.
    */
-  async #showActive({ quiet = false } = {}): Promise<boolean> {
+  async #showActive({ quiet = false } = {}): Promise<Load> {
     const wanted = this.tabSet.active;
     for (let tab = activeTab(this.tabSet); tab; tab = activeTab(this.tabSet)) {
-      if (await this.#loadTab(tab)) return tab.id === wanted;
+      const result = await this.#loadTab(tab);
+      if (result === "loaded") return tab.id === wanted ? "loaded" : "failed";
+      if (result !== "failed") return result;
       if (!quiet) toast.error(`Could not open ${tab.path.split("/").pop()}`);
       dropTabs(this.tabSet, tab.path);
       this.#persistTabs();
     }
     this.closeDoc();
-    return false;
+    return "failed";
   }
 
-  /** Switch to a tab; false when a save conflict holds the reader here, or it failed. */
+  /** Switch to a tab; false when unsaved edits hold the reader here, or it failed. */
   async activateTab(id: string): Promise<boolean> {
     if (id === this.tabSet.active) return true;
     if (!this.tabSet.tabs.some((t) => t.id === id)) return false;
-    if (this.dirty) await this.save();
-    if (!canLeave(this.conflict !== null, id, this.tabSet)) return false;
+    if (!canLeave(!(await this.#flush()), id, this.tabSet)) return false;
+    const before = this.#place();
     this.#stashActive();
     this.tabSet.active = id;
     // Persisted by openDoc once it loads (or as tabs that fail are dropped).
-    return this.#showActive();
+    const result = await this.#showActive();
+    // Edits came up that need the reader: back to the tab that shows them.
+    if (result === "blocked") this.#returnTo(before);
+    return result === "loaded";
   }
 
   /**
@@ -1261,34 +1353,36 @@ class AppState {
       this.#persistTabs();
       return true;
     }
-    if (this.dirty) await this.save();
-    if (this.conflict) return false;
-    const prev = { active: this.tabSet.active, nav: this.nav, view: this.viewMode };
+    if (!(await this.#flush())) return false;
+    const before = this.#place();
     this.#stashActive();
     const { id } = addTab(this.tabSet, path, this.#defaultView()).tab;
     const tab = activeTab(this.tabSet)!;
     this.nav = tab.nav;
     if (!this.focusMode) this.viewMode = tab.view;
     // openDoc lists the tab once the document has loaded.
-    if (await this.openDoc(path, { fromTab: true })) return true;
-    // It didn't load: the tab goes, and the one before is still shown.
-    removeTab(this.tabSet, id);
-    this.tabSet.active = prev.active;
-    this.nav = prev.nav;
-    this.viewMode = prev.view;
+    const result = await this.#open(path, { fromTab: true });
+    if (result === "loaded") return true;
+    // Superseded: a later load owns the tabs; this one stays, unloaded.
+    if (result !== "superseded") {
+      // It didn't load: the tab goes, and the one before is still shown.
+      removeTab(this.tabSet, id);
+      this.#returnTo(before);
+    }
     return false;
   }
 
   async closeTab(id: string) {
+    const closingActive = id === this.tabSet.active;
+    // Closing the active tab leaves its document: never with edits behind.
+    const held = closingActive && !(await this.#flush());
     const i = this.tabSet.tabs.findIndex((t) => t.id === id);
     if (i < 0) return;
-    const closingActive = id === this.tabSet.active;
-    if (closingActive && this.dirty) await this.save();
     // What shows afterwards: a neighbour, or the same tab for a background close.
     const next = closingActive
       ? ((this.tabSet.tabs[i + 1] ?? this.tabSet.tabs[i - 1])?.id ?? "")
       : (this.tabSet.active ?? "");
-    if (!canLeave(this.conflict !== null, next, this.tabSet)) return;
+    if (!canLeave(held, next, this.tabSet)) return;
     removeTab(this.tabSet, id);
     this.#persistTabs();
     if (!closingActive) return;
@@ -1729,8 +1823,7 @@ class AppState {
     const dir = await open({ directory: true, defaultPath: this.libraryRoot });
     if (typeof dir !== "string") return;
     // Every tab closes with the old library: nothing unsaved may go with it.
-    if (this.dirty) await this.save();
-    if (this.conflict) return;
+    if (!(await this.#flush())) return;
     try {
       await invoke("clear_workspace", { keep: [] });
       this.workspace = null;
