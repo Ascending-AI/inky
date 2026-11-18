@@ -354,10 +354,10 @@ fn workspace_root(app: tauri::AppHandle) -> Option<String> {
     places.workspace().map(|l| to_string(l.root().to_path_buf()))
 }
 
-/// Back to Library. `keep` is the open document, which stays editable.
+/// Back to Library. `keep` are the open documents, which stay editable.
 #[tauri::command]
-fn clear_workspace(app: tauri::AppHandle, keep: Option<String>) {
-    app.state::<AppPlaces>().0.lock().unwrap().clear_workspace(keep.as_deref());
+fn clear_workspace(app: tauri::AppHandle, keep: Vec<String>) {
+    app.state::<AppPlaces>().0.lock().unwrap().clear_workspace(&keep);
     start_watcher(&app);
 }
 
@@ -372,12 +372,42 @@ fn follow_link(app: tauri::AppHandle, from_doc: String, href: String) -> Result<
 #[tauri::command]
 fn note_recent(app: tauri::AppHandle, path: String) -> Result<(), String> {
     let abs = to_string(place(&app, &path)?.doc(&path)?.resolve(&path)?);
-    // Guard dropped at the end of this statement, before `update_recents`.
-    app.state::<AppPlaces>().0.lock().unwrap().set_current(PathBuf::from(&abs));
     let a = abs.clone();
     update_recents(&app, |r| recents::push(r, &a));
     note_dock_recent(&app, abs);
     Ok(())
+}
+
+/// Record the documents open in tabs. Only paths the app can already reach
+/// are kept (the `note_recent` check), so this never creates a grant.
+/// Returns the accepted absolute paths.
+#[tauri::command]
+fn set_open_tabs(app: tauri::AppHandle, paths: Vec<String>) -> Vec<String> {
+    let accepted: Vec<String> = paths
+        .iter()
+        .filter_map(|p| place(&app, p).ok()?.doc(p).ok()?.resolve(p).ok())
+        .map(to_string)
+        .collect();
+    app.state::<AppPlaces>()
+        .0
+        .lock()
+        .unwrap()
+        .set_open(accepted.iter().map(PathBuf::from).collect());
+    let config = read_config(&app);
+    if config.open_tabs != accepted {
+        let _ = write_config(&app, &Config { open_tabs: accepted.clone(), ..config });
+    }
+    accepted
+}
+
+/// Re-grant a document that was open in a tab at last quit. Only paths in the
+/// persisted `open_tabs` list are accepted.
+#[tauri::command]
+fn restore_tab(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    let lib = open_library(&app)?;
+    let listed = read_config(&app).open_tabs;
+    let granted = app.state::<AppPlaces>().0.lock().unwrap().grant_listed(&lib, &listed, &path)?;
+    Ok(to_string(granted))
 }
 
 #[tauri::command]
@@ -391,7 +421,7 @@ fn recent_docs(app: tauri::AppHandle) -> Vec<String> {
 fn open_recent(app: tauri::AppHandle, path: String) -> Result<String, String> {
     let lib = open_library(&app)?;
     let recent = read_config(&app).recent;
-    let granted = app.state::<AppPlaces>().0.lock().unwrap().grant_recent(&lib, &recent, &path)?;
+    let granted = app.state::<AppPlaces>().0.lock().unwrap().grant_listed(&lib, &recent, &path)?;
     Ok(to_string(granted))
 }
 
@@ -1063,6 +1093,8 @@ pub fn run() {
             clear_workspace,
             follow_link,
             note_recent,
+            set_open_tabs,
+            restore_tab,
             recent_docs,
             open_recent,
             take_pending_opens,

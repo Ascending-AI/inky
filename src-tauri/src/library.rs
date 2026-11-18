@@ -30,6 +30,9 @@ pub struct Config {
     /// Secret agents send to the app's HTTP MCP server (see `mcp::serve_http`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_token: Option<String>,
+    /// Documents open in tabs, in tab order; the only list `restore_tab` trusts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub open_tabs: Vec<String>,
 }
 
 /// `~/Library/Application Support/com.inky.app/config.json` on macOS — the same

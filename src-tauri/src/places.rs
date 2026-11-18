@@ -53,8 +53,8 @@ pub struct LinkTarget {
 pub struct Places {
     workspace: Option<Library>,
     files: HashSet<PathBuf>,
-    /// The document the window last opened (see `set_current`).
-    current: Option<PathBuf>,
+    /// Every document open in a tab (see `set_open`).
+    open: HashSet<PathBuf>,
 }
 
 impl Places {
@@ -67,10 +67,10 @@ impl Places {
         self.workspace.as_ref().unwrap_or(library)
     }
 
-    /// Remember the open document, so replacing the workspace it lives in
-    /// keeps it editable.
-    pub fn set_current(&mut self, path: PathBuf) {
-        self.current = Some(path);
+    /// Remember the documents open in tabs, so replacing the workspace they
+    /// live in keeps them editable.
+    pub fn set_open(&mut self, paths: Vec<PathBuf>) {
+        self.open = paths.into_iter().collect();
     }
 
     pub fn set_workspace(&mut self, dir: &Path) -> Result<PathBuf, String> {
@@ -79,25 +79,27 @@ impl Places {
         }
         let lib = Library::open(dir)?.without_sidecars();
         let root = lib.root().to_path_buf();
-        let current = self.current.as_ref().map(|p| p.to_string_lossy().into_owned());
-        self.close_workspace(current.as_deref());
+        let open: Vec<String> = self.open.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        self.close_workspace(&open);
         self.workspace = Some(lib);
         Ok(root)
     }
 
-    /// Back to the library. `keep` (the open document) stays editable if it
-    /// lives in the workspace being closed.
-    pub fn clear_workspace(&mut self, keep: Option<&str>) {
+    /// Back to the library. Each `keep` path (an open document) stays
+    /// editable if it lives in the workspace being closed.
+    pub fn clear_workspace(&mut self, keep: &[String]) {
         self.close_workspace(keep);
     }
 
-    /// Drop the workspace; `keep` becomes a single-file grant if it is a
-    /// Markdown document inside it.
-    fn close_workspace(&mut self, keep: Option<&str>) {
-        if let (Some(ws), Some(keep)) = (self.workspace.take(), keep) {
-            if let Ok(p) = ws.resolve(keep) {
-                if p.is_file() && is_doc(&p) {
-                    self.files.insert(p);
+    /// Drop the workspace; each `keep` path becomes a single-file grant if it
+    /// is a Markdown document inside it.
+    fn close_workspace(&mut self, keep: &[String]) {
+        if let Some(ws) = self.workspace.take() {
+            for k in keep {
+                if let Ok(p) = ws.resolve(k) {
+                    if p.is_file() && is_doc(&p) {
+                        self.files.insert(p);
+                    }
                 }
             }
         }
@@ -131,11 +133,11 @@ impl Places {
         Some(OpenRequest::File { path: canon })
     }
 
-    /// `open_recent`: only paths in the persisted `recent` list; reachable
-    /// ones pass through, outside ones are granted.
-    pub fn grant_recent(&mut self, library: &Library, recent: &[String], path: &str) -> Result<PathBuf, String> {
-        if !recent.iter().any(|r| r == path) {
-            return Err("Not a recent document".into());
+    /// `open_recent` / `restore_tab`: only paths in the persisted `listed`
+    /// paths; reachable ones pass through, outside ones are granted.
+    pub fn grant_listed(&mut self, library: &Library, listed: &[String], path: &str) -> Result<PathBuf, String> {
+        if !listed.iter().any(|r| r == path) {
+            return Err("Not a recent or open document".into());
         }
         if let Ok(place) = self.find(library, path) {
             return place.doc(path)?.resolve(path);
@@ -372,7 +374,7 @@ mod tests {
         let mut places = Places::default();
         places.set_workspace(&f.outside).unwrap();
         let a = s(&f.outside.join("a.md"));
-        places.clear_workspace(Some(&a));
+        places.clear_workspace(&[a.clone()]);
         assert!(places.workspace().is_none());
         assert_eq!(places.active(&f.library).root(), f.library.root());
         assert!(places.find(&f.library, &a).is_ok(), "open doc stays editable");
@@ -380,18 +382,38 @@ mod tests {
     }
 
     #[test]
-    fn replacing_workspace_keeps_current_doc_writable() {
+    fn replacing_workspace_keeps_every_open_doc_writable() {
         let f = fixture();
         let other = tempdir();
         let mut places = Places::default();
         places.set_workspace(&f.outside).unwrap();
         let a = f.outside.join("a.md");
-        places.set_current(a.clone());
+        let b = f.outside.join("b.md");
+        let c = f.outside.join("c.md");
+        fs::write(&c, "C").unwrap();
+        places.set_open(vec![a.clone(), b.clone()]);
         places.set_workspace(other.path()).unwrap();
-        let place = places.find(&f.library, &s(&a)).expect("open doc stays reachable");
-        place.doc(&s(&a)).unwrap().write(&s(&a), "A3").unwrap();
-        assert_eq!(fs::read_to_string(&a).unwrap(), "A3");
-        assert!(places.find(&f.library, &s(&f.outside.join("b.md"))).is_err());
+        for (path, text) in [(&a, "A3"), (&b, "B3")] {
+            let place = places.find(&f.library, &s(path)).expect("open doc stays reachable");
+            place.doc(&s(path)).unwrap().write(&s(path), text).unwrap();
+            assert_eq!(fs::read_to_string(path).unwrap(), text);
+        }
+        assert!(places.find(&f.library, &s(&c)).is_err());
+    }
+
+    #[test]
+    fn clear_workspace_keeps_each_listed_doc() {
+        let f = fixture();
+        let mut places = Places::default();
+        places.set_workspace(&f.outside).unwrap();
+        let a = f.outside.join("a.md");
+        let b = f.outside.join("b.md");
+        let c = f.outside.join("c.md");
+        fs::write(&c, "C").unwrap();
+        places.clear_workspace(&[s(&a), s(&b)]);
+        assert!(places.find(&f.library, &s(&a)).is_ok());
+        assert!(places.find(&f.library, &s(&b)).is_ok());
+        assert!(places.find(&f.library, &s(&c)).is_err());
     }
 
     #[test]
@@ -401,7 +423,7 @@ mod tests {
         let mut places = Places::default();
         places.set_workspace(ws.path()).unwrap();
         // `keep` is not in the closing workspace, so it must not become a grant.
-        places.clear_workspace(Some(&s(&f.outside.join("a.md"))));
+        places.clear_workspace(&[s(&f.outside.join("a.md"))]);
         assert!(places.find(&f.library, &s(&f.outside.join("a.md"))).is_err());
     }
 
@@ -604,18 +626,18 @@ mod tests {
     }
 
     #[test]
-    fn grant_recent_only_grants_listed_paths() {
+    fn grant_listed_only_grants_listed_paths() {
         let f = fixture();
         let mut places = Places::default();
         let a = s(&f.outside.join("a.md"));
         let b = s(&f.outside.join("b.md"));
         let inside = s(&f.library.root().join("in.md"));
         let recent = vec![a.clone(), inside.clone()];
-        assert!(places.grant_recent(&f.library, &recent, &b).is_err());
+        assert!(places.grant_listed(&f.library, &recent, &b).is_err());
         assert!(places.find(&f.library, &b).is_err());
-        assert_eq!(places.grant_recent(&f.library, &recent, &inside).unwrap(), PathBuf::from(&inside));
+        assert_eq!(places.grant_listed(&f.library, &recent, &inside).unwrap(), PathBuf::from(&inside));
         assert!(places.files.is_empty(), "library paths pass through without a grant");
-        assert_eq!(places.grant_recent(&f.library, &recent, &a).unwrap(), PathBuf::from(&a));
+        assert_eq!(places.grant_listed(&f.library, &recent, &a).unwrap(), PathBuf::from(&a));
         assert!(places.find(&f.library, &a).is_ok());
     }
 
