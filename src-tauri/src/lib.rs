@@ -888,7 +888,11 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
                 .build(handle)?,
         )
         .separator()
-        .close_window()
+        .item(
+            &MenuItemBuilder::with_id("close_tab", "Close Tab")
+                .accelerator("CmdOrCtrl+W")
+                .build(handle)?,
+        )
         .build()?;
 
     let edit_sub = SubmenuBuilder::new(handle, "Edit")
@@ -989,6 +993,17 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
     let window_sub = SubmenuBuilder::new(handle, "Window")
         .minimize()
         .maximize()
+        .separator()
+        .item(
+            &MenuItemBuilder::with_id("next_tab", "Show Next Tab")
+                .accelerator("CmdOrCtrl+Shift+]")
+                .build(handle)?,
+        )
+        .item(
+            &MenuItemBuilder::with_id("prev_tab", "Show Previous Tab")
+                .accelerator("CmdOrCtrl+Shift+[")
+                .build(handle)?,
+        )
         .build()?;
 
     let menu = MenuBuilder::new(handle)

@@ -44,6 +44,9 @@
       new_diagram: () => app.newDoc(undefined, "mermaid"),
       paste_new: () => app.pasteAsNewDoc(),
       save: () => app.save(),
+      close_tab: () => app.closeActiveTab(),
+      next_tab: () => app.cycleTabs(1),
+      prev_tab: () => app.cycleTabs(-1),
       export_pdf: () => app.exportPdf(),
       print: () => app.printDoc(),
       find: () => app.openSearch(),
@@ -168,6 +171,11 @@
   }
 
   function handleKeydown(event: KeyboardEvent) {
+    if (event.ctrlKey && event.key === "Tab") {
+      event.preventDefault();
+      app.cycleTabs(event.shiftKey ? -1 : 1);
+      return;
+    }
     if (!event.metaKey) return;
     const key = event.key.toLowerCase();
     if ((key === "[" || key === "]") && !event.shiftKey && !inTextInput(event.target)) {
