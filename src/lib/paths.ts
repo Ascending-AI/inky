@@ -57,3 +57,13 @@ export function remapPath(path: string, from: string, to: string): string {
   if (path.startsWith(from + "/")) return to + path.slice(from.length);
   return path;
 }
+
+/** Folder paths stored as a JSON array; anything malformed reads as none. */
+export function parsePathList(raw: string | null): string[] {
+  try {
+    const list: unknown = JSON.parse(raw ?? "[]");
+    return Array.isArray(list) ? list.filter((p): p is string => typeof p === "string") : [];
+  } catch {
+    return [];
+  }
+}

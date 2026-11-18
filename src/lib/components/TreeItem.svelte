@@ -22,8 +22,7 @@
   }
   let { node, depth, onrequestrename, onrequestdelete, onrequestnewfolder }: Props = $props();
 
-  // svelte-ignore state_referenced_locally -- only the initial depth matters here
-  let expanded = $state(depth === 0);
+  const expanded = $derived(node.isDir && app.expandedDirs.has(node.path));
   let dropHover = $state(false);
   let menuOpen = $state(false);
   const isImage = $derived(!node.isDir && isImagePath(node.path));
@@ -36,7 +35,7 @@
 
   function activate() {
     if (node.isDir) {
-      expanded = !expanded;
+      app.setExpanded(node.path, !expanded);
     } else if (isImage) {
       app.openImage(node.path);
     } else {
@@ -64,7 +63,7 @@
     if (!src || src === node.path) return;
     e.preventDefault();
     e.stopPropagation();
-    expanded = true;
+    app.setExpanded(node.path, true);
     app.movePath(src, node.path);
   }
 

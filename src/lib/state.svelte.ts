@@ -11,7 +11,8 @@ import { EditorView } from "@codemirror/view";
 import type { OpenRequest, ThemeName, TreeNode, ViewMode } from "./types";
 import { WELCOME_DOC, MERMAID_TEMPLATE } from "./templates";
 import { extractToc, type TocEntry } from "./markdown";
-import { isImagePath, isInside, remapPath } from "./paths";
+import { isImagePath, isInside, parsePathList, remapPath } from "./paths";
+import { SvelteSet } from "svelte/reactivity";
 import { capturePosition, forgetPositions, remapPositions, targetScrollTop } from "./readpos";
 import { baselineAfterEdit, diffBlocks, merge3, type ChangeSet, type MergeConflict } from "./changes";
 import {
@@ -89,6 +90,8 @@ class AppState {
   tree = $state<TreeNode[]>([]);
   /** List `.inkyignore`d items in the sidebar (dimmed). */
   showHidden = $state(false);
+  /** Sidebar folders the reader expanded (absolute paths); all others start closed. */
+  expandedDirs = new SvelteSet<string>();
   currentPath = $state<string | null>(null);
   /** What changed in the open document since the reader last read it. */
   changes = $state<ChangeSet | null>(null);
@@ -262,6 +265,9 @@ class AppState {
     this.syncScroll = localStorage.getItem("inky.syncScroll") !== "false";
     this.sidebarVisible = localStorage.getItem("inky.sidebar") !== "false";
     this.showHidden = localStorage.getItem("inky.showHidden") === "true";
+    for (const dir of parsePathList(localStorage.getItem("inky.expandedDirs"))) {
+      this.expandedDirs.add(dir);
+    }
     this.loadRemoteImages = localStorage.getItem("inky.remoteImages") === "true";
     const storedColor = localStorage.getItem("inky.highlightColor");
     if (isColor(storedColor)) this.highlightColor = storedColor;
@@ -824,6 +830,7 @@ class AppState {
     try {
       const newPath = await invoke<string>("move_path", { path, targetDir });
       renamePath(this.nav, path, newPath);
+      this.#remapExpanded(path, newPath);
       if (this.imagePath) this.imagePath = remapPath(this.imagePath, path, newPath);
       remapPositions(path, newPath);
       if (remapStore(this.highlightStore, path, newPath)) this.#saveHighlights();
@@ -849,6 +856,26 @@ class AppState {
     } catch (e) {
       toast.error(`Could not read library: ${e}`);
     }
+  }
+
+  setExpanded(dir: string, open: boolean) {
+    if (open === this.expandedDirs.has(dir)) return;
+    if (open) this.expandedDirs.add(dir);
+    else this.expandedDirs.delete(dir);
+    this.#saveExpanded();
+  }
+
+  /** Keep a renamed or moved folder (and the folders inside it) expanded. */
+  #remapExpanded(from: string, to: string) {
+    const moved = [...this.expandedDirs].filter((dir) => isInside(dir, from));
+    if (!moved.length) return;
+    for (const dir of moved) this.expandedDirs.delete(dir);
+    for (const dir of moved) this.expandedDirs.add(remapPath(dir, from, to));
+    this.#saveExpanded();
+  }
+
+  #saveExpanded() {
+    localStorage.setItem("inky.expandedDirs", JSON.stringify([...this.expandedDirs]));
   }
 
   toggleShowHidden() {
@@ -1263,6 +1290,7 @@ class AppState {
   async newFolder(dir: string | undefined, name: string) {
     try {
       await invoke("create_folder", { dir: dir ?? this.activeRoot, name });
+      if (dir && dir !== this.activeRoot) this.setExpanded(dir, true);
       await this.refreshTree();
     } catch (e) {
       toast.error(`Could not create folder: ${e}`);
@@ -1273,6 +1301,7 @@ class AppState {
     try {
       const newPath = await invoke<string>("rename_path", { path, newName });
       renamePath(this.nav, path, newPath);
+      this.#remapExpanded(path, newPath);
       if (this.imagePath) this.imagePath = remapPath(this.imagePath, path, newPath);
       remapPositions(path, newPath);
       if (remapStore(this.highlightStore, path, newPath)) this.#saveHighlights();

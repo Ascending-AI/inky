@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { breadcrumbs, displayDir, isImagePath, isInside, remapPath } from "$lib/paths";
+import {
+  breadcrumbs,
+  displayDir,
+  isImagePath,
+  isInside,
+  parsePathList,
+  remapPath,
+} from "$lib/paths";
 
 describe("isInside", () => {
   it("matches the root itself and its descendants only", () => {
@@ -66,5 +73,15 @@ describe("remapPath", () => {
     expect(remapPath("/a/x.png", "/a/x.png", "/a/y.png")).toBe("/a/y.png");
     expect(remapPath("/a/img/x.png", "/a/img", "/b/img")).toBe("/b/img/x.png");
     expect(remapPath("/a/imgs/x.png", "/a/img", "/b/img")).toBe("/a/imgs/x.png");
+  });
+});
+
+describe("parsePathList", () => {
+  it("reads a stored list and ignores anything malformed", () => {
+    expect(parsePathList('["/lib/a","/lib/b"]')).toEqual(["/lib/a", "/lib/b"]);
+    expect(parsePathList('["/lib/a",3,null]')).toEqual(["/lib/a"]);
+    expect(parsePathList(null)).toEqual([]);
+    expect(parsePathList("{oops")).toEqual([]);
+    expect(parsePathList('{"a":1}')).toEqual([]);
   });
 });
