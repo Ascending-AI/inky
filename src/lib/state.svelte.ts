@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -197,6 +197,14 @@ class AppState {
   } | null>(null);
   /** A block is being edited in place in the reading pane (see Preview). */
   #editingInPlace = false;
+  /**
+   * Set by the Preview while mounted: commits a block being edited in place
+   * into `content` (its text reaches `content` only when the edit ends).
+   */
+  commitInPlaceEdit: (() => void) | null = null;
+  /** Bumped whenever a load replaces the document; an in-place edit begun
+   *  under an older one never lands in this one. */
+  docLoads = 0;
   /** A disk change arrived during an in-place edit; check once it ends. */
   #diskCheckPending = false;
 
@@ -373,14 +381,9 @@ class AppState {
     window.addEventListener("blur", () => {
       if (this.dirty && !this.conflict) this.save();
     });
-    // Red-button close: flush unsaved changes first.
+    // Red-button close: save first; the window closes once nothing is left.
     getCurrentWindow().onCloseRequested(async (event) => {
-      if (this.dirty) {
-        event.preventDefault();
-        await this.save();
-        // Unresolved conflict: stay open so the reader can choose.
-        if (!this.conflict) getCurrentWindow().destroy();
-      }
+      if (!(await this.#leave({ quitting: true }))) event.preventDefault();
     });
 
     this.syncMenuChecks();
@@ -425,9 +428,7 @@ class AppState {
 
   /** ⌘Q — save, then exit. */
   async quitApp() {
-    if (this.dirty) await this.save();
-    if (this.conflict) return;
-    await invoke("quit_app");
+    if (await this.#leave({ quitting: true })) await invoke("quit_app");
   }
 
   async startMcpServer(announce: boolean) {
@@ -969,7 +970,7 @@ class AppState {
     }
     if (kept) {
       toast.warning(
-        `${kept.path.split("/").pop()} was deleted by an agent. Your unsaved edits are still open; save (⌘S) to keep them.`,
+        `${kept.path.split("/").pop()} was deleted by an agent. Your unsaved edits are still open; saving restores the file.`,
       );
     }
   }
@@ -1120,10 +1121,11 @@ class AppState {
   async #open(path: string, opts: OpenOptions = {}): Promise<Load> {
     const seq = ++this.#loadSeq;
     const superseded = () => seq !== this.#loadSeq;
-    if (this.dirty) await this.save();
+    // Loading replaces the buffer, even with the same document: never over
+    // edits that are still unsaved.
+    const left = await this.#leave();
     if (superseded()) return "superseded";
-    // Saving surfaced a conflict: resolve it before leaving, or edits are lost.
-    if (this.conflict && path !== this.currentPath) return "blocked";
+    if (!left) return "blocked";
     const leaving = this.#here();
     try {
       const text = await invoke<string>("read_doc", { path });
@@ -1144,6 +1146,7 @@ class AppState {
         this.#baseline = null;
       }
       this.currentPath = path;
+      this.docLoads++;
       this.content = text;
       this.savedContent = text;
       // The active tab shows it now; with no tab open, this is the first.
@@ -1206,11 +1209,15 @@ class AppState {
   }
 
   async #travel(step: typeof goBack) {
+    if (!(step === goBack ? this.canGoBack : this.canGoForward)) return;
+    // Leave first, so history only moves once the document can be left.
+    if (!(await this.#leave())) return;
     const here = this.#here();
     const target = step(this.nav, here);
     if (!target) return;
     const restoreScroll = target.scroll;
-    const done = (r: Load) => r === "loaded" || r === "superseded";
+    // Only a document that can't be opened falls through to a re-grant.
+    const done = (r: Load) => r !== "failed";
     if (done(await this.#open(target.path, { restoreScroll, silent: true }))) return;
     // Outside documents of a closed workspace need re-granting (recents).
     const seq = this.#loadSeq;
@@ -1227,6 +1234,7 @@ class AppState {
   closeDoc() {
     this.conflict = null;
     this.currentPath = null;
+    this.docLoads++;
     this.changes = null;
     this.#baseline = null;
     this.content = "";
@@ -1268,13 +1276,41 @@ class AppState {
   }
 
   /**
-   * Save before leaving the open document. False when edits would be left
-   * behind: a conflict to resolve, or a save that didn't go through.
+   * Save before leaving the open document. "conflict": a save conflict for
+   * the reader to resolve. "failed": the edits couldn't be written.
    */
-  async #flush(): Promise<boolean> {
-    // A clean merge with someone else's change leaves the merged text to save.
-    for (let i = 0; i < 2 && this.dirty && !this.conflict; i++) await this.save();
-    return !this.dirty && !this.conflict;
+  async #flush(): Promise<"saved" | "conflict" | "failed"> {
+    // A clean merge with someone else's change leaves the merged text to
+    // save. A write that failed isn't retried: one error is enough.
+    for (let i = 0; i < 2 && this.dirty && !this.conflict; i++) {
+      if (!(await this.save())) return "failed";
+    }
+    if (this.conflict) return "conflict";
+    return this.dirty ? "failed" : "saved";
+  }
+
+  /**
+   * The one way out of the open document (switching or closing its tab,
+   * opening another, Back/Forward, quitting): commit an in-place edit, then
+   * save. True when nothing unsaved is left behind. A showing conflict keeps
+   * the reader here. Edits that can't be written are the reader's call:
+   * discard them and go on (when `quitting`: quit anyway), or stay.
+   */
+  async #leave({ quitting = false } = {}): Promise<boolean> {
+    this.commitInPlaceEdit?.();
+    const flushed = await this.#flush();
+    if (flushed !== "failed") return flushed === "saved";
+    const [question, okLabel, cancelLabel] = quitting
+      ? ["Quit anyway?", "Quit", "Cancel"]
+      : ["Discard your changes?", "Discard", "Stay"];
+    const go = await ask(`Couldn't save ${this.docName}. ${question}`, {
+      title: "Inky",
+      kind: "warning",
+      okLabel,
+      cancelLabel,
+    }).catch(() => false);
+    if (go && !quitting) this.content = this.savedContent;
+    return go;
   }
 
   /** The active tab with its history and view, to come back to. */
@@ -1330,7 +1366,7 @@ class AppState {
   async activateTab(id: string): Promise<boolean> {
     if (id === this.tabSet.active) return true;
     if (!this.tabSet.tabs.some((t) => t.id === id)) return false;
-    if (!canLeave(!(await this.#flush()), id, this.tabSet)) return false;
+    if (!canLeave(!(await this.#leave()), id, this.tabSet)) return false;
     const before = this.#place();
     this.#stashActive();
     this.tabSet.active = id;
@@ -1353,7 +1389,7 @@ class AppState {
       this.#persistTabs();
       return true;
     }
-    if (!(await this.#flush())) return false;
+    if (!(await this.#leave())) return false;
     const before = this.#place();
     this.#stashActive();
     const { id } = addTab(this.tabSet, path, this.#defaultView()).tab;
@@ -1375,7 +1411,7 @@ class AppState {
   async closeTab(id: string) {
     const closingActive = id === this.tabSet.active;
     // Closing the active tab leaves its document: never with edits behind.
-    const held = closingActive && !(await this.#flush());
+    const held = closingActive && !(await this.#leave());
     const i = this.tabSet.tabs.findIndex((t) => t.id === id);
     if (i < 0) return;
     // What shows afterwards: a neighbour, or the same tab for a background close.
@@ -1416,23 +1452,24 @@ class AppState {
    * the version Inky last loaded: if the file changed since (an agent
    * edited it), nothing is overwritten; the change is merged in instead.
    */
-  async save() {
-    if (!this.currentPath) return;
+  /** False only when the edits couldn't be written (a conflict or merge is not a failure). */
+  async save(): Promise<boolean> {
+    if (!this.currentPath) return true;
     if (this.#autosaveTimer) {
       clearTimeout(this.#autosaveTimer);
       this.#autosaveTimer = null;
     }
-    if (this.conflict) return;
+    if (this.conflict) return true;
     const path = this.currentPath;
     const text = this.content;
     const base = this.savedContent;
     // An unedited buffer is never written: it could only clobber a newer file.
-    if (text === base) return;
-    await this.#write(path, text, base);
+    if (text === base) return true;
+    return (await this.#write(path, text, base)) !== "failed";
   }
 
   /** Write `text` if the file still holds `expected`; merge otherwise. */
-  async #write(path: string, text: string, expected: string): Promise<boolean> {
+  async #write(path: string, text: string, expected: string): Promise<"written" | "conflict" | "failed"> {
     try {
       const res = await invoke<{ status: "written" } | { status: "conflict"; disk: string }>(
         "write_doc",
@@ -1440,14 +1477,14 @@ class AppState {
       );
       if (res.status === "conflict") {
         await this.#takeDiskChange(path, res.disk);
-        return false;
+        return "conflict";
       }
       if (path === this.currentPath) this.savedContent = text;
       this.#noteOwnEdit(path, text);
-      return true;
+      return "written";
     } catch (e) {
       toast.error(`Save failed: ${e}`);
-      return false;
+      return "failed";
     }
   }
 
@@ -1823,7 +1860,7 @@ class AppState {
     const dir = await open({ directory: true, defaultPath: this.libraryRoot });
     if (typeof dir !== "string") return;
     // Every tab closes with the old library: nothing unsaved may go with it.
-    if (!(await this.#flush())) return;
+    if (!(await this.#leave())) return;
     try {
       await invoke("clear_workspace", { keep: [] });
       this.workspace = null;

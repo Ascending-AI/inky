@@ -45,8 +45,8 @@
       paste_new: () => app.pasteAsNewDoc(),
       save: () => app.save(),
       close_tab: () => app.closeActiveTab(),
-      next_tab: () => app.cycleTabs(1),
-      prev_tab: () => app.cycleTabs(-1),
+      next_tab: () => cycleTabs(1, "menu"),
+      prev_tab: () => cycleTabs(-1, "menu"),
       export_pdf: () => app.exportPdf(),
       print: () => app.printDoc(),
       find: () => app.openSearch(),
@@ -170,6 +170,24 @@
     else if (e.button === 4) app.goForward();
   }
 
+  /**
+   * ⌘⇧] / ⌘⇧[ are menu accelerators, but macOS may not match Shift with
+   * punctuation, so the keydown is a fallback. Whichever arrives second
+   * within 300 ms is the same press and is ignored.
+   */
+  let lastTabCycle: { via: "menu" | "key"; step: 1 | -1; at: number } | null = null;
+
+  function cycleTabs(step: 1 | -1, via: "menu" | "key") {
+    const now = Date.now();
+    const last = lastTabCycle;
+    if (last && last.via !== via && last.step === step && now - last.at < 300) {
+      lastTabCycle = null;
+      return;
+    }
+    lastTabCycle = { via, step, at: now };
+    app.cycleTabs(step);
+  }
+
   function handleKeydown(event: KeyboardEvent) {
     if (event.ctrlKey && event.key === "Tab") {
       event.preventDefault();
@@ -177,6 +195,11 @@
       return;
     }
     if (!event.metaKey) return;
+    if (event.shiftKey && (event.code === "BracketRight" || event.code === "BracketLeft")) {
+      event.preventDefault();
+      cycleTabs(event.code === "BracketRight" ? 1 : -1, "key");
+      return;
+    }
     const key = event.key.toLowerCase();
     if ((key === "[" || key === "]") && !event.shiftKey && !inTextInput(event.target)) {
       event.preventDefault();

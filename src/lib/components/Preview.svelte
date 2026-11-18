@@ -508,6 +508,19 @@
     return richWrapper !== null || rawFinish !== null;
   }
 
+  /** The document load the session began under (see app.docLoads). */
+  let sessionLoad = -1;
+  /** A session's text lands only in the document it was begun in. */
+  function sessionOwnsDoc(): boolean {
+    return sessionLoad === app.docLoads;
+  }
+
+  /** End the session, keeping its edits (leaving the document, unmounting). */
+  function commitSession() {
+    if (richWrapper) finishRichEdit(true);
+    else rawFinish?.(true);
+  }
+
   /** blockEditing can only be true while a session exists; repair otherwise. */
   function healStuckSession() {
     if (blockEditing && !sessionAlive()) blockEditing = false;
@@ -685,6 +698,7 @@
 
   function startRichBlockEdit(el: HTMLElement, block: SourceBlock, caret: CaretHint) {
     blockEditing = true;
+    sessionLoad = app.docLoads;
     richBlock = block;
     richInsert = false;
     richSeps = { lead: "", tail: "" };
@@ -808,6 +822,7 @@
     }
 
     blockEditing = true;
+    sessionLoad = app.docLoads;
     richBlock = { start: pos, end: pos };
     richInsert = true;
     richOriginalHtml = "";
@@ -858,6 +873,8 @@
       if (restored) wrapper.replaceWith(restored);
       else wrapper.remove();
     }
+    // Another document replaced this one: its offsets mean nothing there.
+    if (!sessionOwnsDoc()) return restored;
     if (!commit) {
       if (restored && !isInsert) blockMap.set(restored, block);
       return restored;
@@ -945,6 +962,7 @@
   // plus syntax coloring in the fence's language.
   function startRawBlockEdit(el: HTMLElement, block: SourceBlock, caret: "start" | "end" = "start") {
     blockEditing = true;
+    sessionLoad = app.docLoads;
     const original = app.content.slice(block.start, block.end);
     // For code blocks, edit only the code — keep the fence lines out of view.
     let prefix = "";
@@ -980,7 +998,7 @@
       view.destroy();
       host.remove();
       el.style.display = "";
-      if (commit && value !== original) {
+      if (commit && value !== original && sessionOwnsDoc()) {
         shiftBlocks(block.end, value.length - (block.end - block.start));
         blockMap.set(el, { start: block.start, end: block.start + value.length });
         app.content = app.content.slice(0, block.start) + value + app.content.slice(block.end);
@@ -1298,8 +1316,14 @@
   onMount(() => {
     app.searchBackends.preview = { update: searchUpdate, goto: searchGoto, clear: searchClear };
     app.previewScroller = scroller ?? null;
+    app.commitInPlaceEdit = commitSession;
     const unregisterSync = scroller ? registerScroller("preview", scroller) : () => {};
     return () => {
+      // A view switch or rename unmounts mid-edit: the edit is kept.
+      commitSession();
+      if (app.commitInPlaceEdit === commitSession) app.commitInPlaceEdit = null;
+      // The effect that mirrors blockEditing is gone with the component.
+      app.editingInPlace = false;
       if (saveTimer) {
         clearTimeout(saveTimer);
         saveReadingPosition();
@@ -1428,7 +1452,8 @@
     // grants Markdown targets outside the library). The href goes through raw,
     // and the source must be saved so Rust can check the link is really there.
     if (!app.currentPath) return;
-    if (app.dirty) await app.save();
+    // A save that failed has said so; the link can't be checked either.
+    if (app.dirty && !(await app.save())) return;
     invoke<{ path: string; doc: boolean }>("follow_link", {
       fromDoc: app.currentPath,
       href,
