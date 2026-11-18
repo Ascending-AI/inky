@@ -29,6 +29,17 @@ const DOC_URI_PREFIX: &str = "inky://doc/";
 /// Shows a document in the Inky app (swapped out in tests).
 pub type Opener = std::sync::Arc<dyn Fn(&std::path::Path) -> Result<(), String> + Send + Sync>;
 
+/// A file or folder an agent renamed, moved or deleted (absolute paths).
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum PathChange {
+    Moved { from: String, to: String },
+    Deleted { path: String },
+}
+
+/// Told about every agent path change (a no-op for the stdio server).
+pub type PathEvents = std::sync::Arc<dyn Fn(PathChange) + Send + Sync>;
+
 /// Hand the file to Inky through macOS `open`, exactly like a Finder
 /// double-click — works from the in-app server and from `Inky --mcp` alike.
 fn open_in_app(path: &std::path::Path) -> Result<(), String> {
@@ -48,6 +59,7 @@ fn open_in_app(path: &std::path::Path) -> Result<(), String> {
 pub struct InkyMcp {
     lib: Library,
     opener: Opener,
+    path_events: PathEvents,
     tool_router: ToolRouter<Self>,
 }
 
@@ -206,6 +218,7 @@ impl InkyMcp {
         Self {
             lib: lib.with_agent_origin(),
             opener: std::sync::Arc::new(open_in_app),
+            path_events: std::sync::Arc::new(|_| {}),
             tool_router: Self::tool_router(),
         }
     }
@@ -213,6 +226,18 @@ impl InkyMcp {
     pub fn with_opener(mut self, opener: Opener) -> Self {
         self.opener = opener;
         self
+    }
+
+    pub fn with_path_events(mut self, f: PathEvents) -> Self {
+        self.path_events = f;
+        self
+    }
+
+    fn report_move(&self, from: &std::path::Path, to: &std::path::Path) {
+        (self.path_events)(PathChange::Moved {
+            from: from.to_string_lossy().into_owned(),
+            to: to.to_string_lossy().into_owned(),
+        });
     }
 
     #[tool(
@@ -340,11 +365,14 @@ impl InkyMcp {
         if p.new_name.contains('/') {
             return reply(Err("new_name must not contain '/'".into()));
         }
-        reply(
-            self.lib
-                .rename(&p.path, &p.new_name)
-                .map(|t| format!("Renamed to {}", self.lib.relative(&t))),
-        )
+        let from = match self.lib.resolve(&p.path) {
+            Ok(a) => a,
+            Err(e) => return reply(Err(e)),
+        };
+        reply(self.lib.rename(&p.path, &p.new_name).map(|t| {
+            self.report_move(&from, &t);
+            format!("Renamed to {}", self.lib.relative(&t))
+        }))
     }
 
     #[tool(
@@ -354,11 +382,14 @@ impl InkyMcp {
     )]
     async fn move_document(&self, Parameters(p): Parameters<MoveParams>) -> CallToolResult {
         let folder = if p.target_folder.is_empty() { "." } else { p.target_folder.as_str() };
-        reply(
-            self.lib
-                .move_into(&p.path, folder)
-                .map(|t| format!("Moved to {}", self.lib.relative(&t))),
-        )
+        let from = match self.lib.resolve(&p.path) {
+            Ok(a) => a,
+            Err(e) => return reply(Err(e)),
+        };
+        reply(self.lib.move_into(&p.path, folder).map(|t| {
+            self.report_move(&from, &t);
+            format!("Moved to {}", self.lib.relative(&t))
+        }))
     }
 
     #[tool(
@@ -386,7 +417,10 @@ impl InkyMcp {
         if !abs.is_file() || !library::is_doc(&abs) {
             return reply(Err("Only documents can be deleted".into()));
         }
-        reply(self.lib.delete(&p.path).map(|_| format!("Deleted {}", p.path)))
+        reply(self.lib.delete(&p.path).map(|_| {
+            (self.path_events)(PathChange::Deleted { path: abs.to_string_lossy().into_owned() });
+            format!("Deleted {}", p.path)
+        }))
     }
 
     #[tool(
@@ -733,7 +767,7 @@ async fn require_secret(
 
 /// Bind `127.0.0.1:port` (0 = any free port) and serve streamable-HTTP MCP at `/mcp`
 /// on the current tokio runtime. Requests must carry `Authorization: Bearer <secret>`.
-pub async fn serve_http(lib: Library, port: u16, secret: &str) -> Result<HttpHandle, String> {
+pub async fn serve_http(lib: Library, port: u16, secret: &str, events: PathEvents) -> Result<HttpHandle, String> {
     if secret.len() < 32 {
         return Err("the MCP secret is too short".into());
     }
@@ -747,7 +781,7 @@ pub async fn serve_http(lib: Library, port: u16, secret: &str) -> Result<HttpHan
     let addr = listener.local_addr().map_err(|e| e.to_string())?;
     let token = CancellationToken::new();
     let service = StreamableHttpService::new(
-        move || Ok(InkyMcp::new(lib.clone())),
+        move || Ok(InkyMcp::new(lib.clone()).with_path_events(events.clone())),
         LocalSessionManager::default().into(),
         StreamableHttpServerConfig::default()
             .with_legacy_session_mode(false)
@@ -837,6 +871,46 @@ mod tests {
         });
         let client = ().serve(client_io).await.unwrap();
         (Fixture { _dir: dir, lib, client, server }, opened)
+    }
+
+    async fn fixture_recording_changes() -> (Fixture, std::sync::Arc<std::sync::Mutex<Vec<PathChange>>>) {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = Library::open(dir.path()).unwrap();
+        let changes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = changes.clone();
+        let handler = InkyMcp::new(lib.clone())
+            .with_path_events(std::sync::Arc::new(move |c| log.lock().unwrap().push(c)));
+        let (server_io, client_io) = tokio::io::duplex(1 << 16);
+        let server = tokio::spawn(async move {
+            let s = handler.serve(server_io).await.unwrap();
+            s.waiting().await.ok();
+        });
+        let client = ().serve(client_io).await.unwrap();
+        (Fixture { _dir: dir, lib, client, server }, changes)
+    }
+
+    #[tokio::test]
+    async fn agent_renames_moves_and_deletes_are_reported() {
+        let (f, changes) = fixture_recording_changes().await;
+        f.lib.write("Notes/a.md", "x").unwrap();
+        let root = f.lib.root().to_path_buf();
+        let s = |p: &str| root.join(p).to_string_lossy().into_owned();
+        let (err, msg) = call(&f, "rename_document", serde_json::json!({"path": "Notes/a.md", "new_name": "b.md"})).await;
+        assert!(!err, "{msg}");
+        let (err, msg) = call(&f, "move_document", serde_json::json!({"path": "Notes/b.md", "target_folder": "Archive"})).await;
+        assert!(!err, "{msg}");
+        let (err, msg) = call(&f, "delete_document", serde_json::json!({"path": "Archive/b.md"})).await;
+        assert!(!err, "{msg}");
+        let expected = vec![
+            PathChange::Moved { from: s("Notes/a.md"), to: s("Notes/b.md") },
+            PathChange::Moved { from: s("Notes/b.md"), to: s("Archive/b.md") },
+            PathChange::Deleted { path: s("Archive/b.md") },
+        ];
+        assert_eq!(*changes.lock().unwrap(), expected);
+        let (err, _) = call(&f, "delete_document", serde_json::json!({"path": "missing.md"})).await;
+        assert!(err);
+        assert_eq!(changes.lock().unwrap().len(), 3, "a failed call records nothing");
+        f.server.abort();
     }
 
     #[tokio::test]
@@ -1096,7 +1170,7 @@ mod tests {
     async fn http_server_answers_initialize_and_stops() {
         let dir = tempfile::tempdir().unwrap();
         let lib = Library::open(dir.path()).unwrap();
-        let handle = serve_http(lib, 0, SECRET).await.unwrap();
+        let handle = serve_http(lib, 0, SECRET, std::sync::Arc::new(|_| {})).await.unwrap();
         assert!(handle.is_running());
         assert!(handle.url().starts_with("http://127.0.0.1:") && handle.url().ends_with("/mcp"));
         let response = post_initialize(handle.addr, &format!("Authorization: Bearer {SECRET}\r\n")).await;
@@ -1120,7 +1194,7 @@ mod tests {
     async fn http_server_refuses_requests_without_the_secret() {
         let dir = tempfile::tempdir().unwrap();
         let lib = Library::open(dir.path()).unwrap();
-        let handle = serve_http(lib, 0, SECRET).await.unwrap();
+        let handle = serve_http(lib, 0, SECRET, std::sync::Arc::new(|_| {})).await.unwrap();
         let none = post_initialize(handle.addr, "").await;
         assert!(none.starts_with("HTTP/1.1 401"), "{none}");
         let wrong = post_initialize(handle.addr, &format!("Authorization: Bearer {}x\r\n", &SECRET[1..])).await;
@@ -1149,8 +1223,8 @@ mod tests {
     async fn http_port_in_use_is_a_clear_error() {
         let dir = tempfile::tempdir().unwrap();
         let lib = Library::open(dir.path()).unwrap();
-        let first = serve_http(lib.clone(), 0, SECRET).await.unwrap();
-        let err = serve_http(lib, first.addr.port(), SECRET).await.unwrap_err();
+        let first = serve_http(lib.clone(), 0, SECRET, std::sync::Arc::new(|_| {})).await.unwrap();
+        let err = serve_http(lib, first.addr.port(), SECRET, std::sync::Arc::new(|_| {})).await.unwrap_err();
         assert!(err.contains("already in use"), "{err}");
         first.stop();
     }

@@ -652,7 +652,11 @@ async fn start_mcp(
     }
     let lib = open_library(&app)?;
     let secret = mcp_secret(&app)?;
-    let handle = mcp::serve_http(lib, port, &secret).await?;
+    let emitter = app.clone();
+    let events: mcp::PathEvents = std::sync::Arc::new(move |c| {
+        let _ = tauri::Emitter::emit(&emitter, "path-change", c);
+    });
+    let handle = mcp::serve_http(lib, port, &secret, events).await?;
     let url = handle.url();
     if let Some(old) = state.0.lock().unwrap().replace(handle) {
         old.stop();
