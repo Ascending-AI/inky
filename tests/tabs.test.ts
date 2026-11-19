@@ -6,6 +6,8 @@ import {
   cycleTab,
   dropTabs,
   emptyTabs,
+  dragShift,
+  dragTarget,
   moveTab,
   parseTabs,
   remapTabs,
@@ -82,6 +84,35 @@ describe("tab set", () => {
     const set = setOf("/a", "/b", "/c");
     moveTab(set, set.tabs[2].id, 0);
     expect(order(set)).toEqual(["/c", "/a", "/b"]);
+  });
+
+  it("dragTarget moves a tab aside once the dragged tab's leading edge passes its middle", () => {
+    const w = [100, 100, 100, 100];
+    expect(dragTarget(w, 0, 0)).toBe(0);
+    expect(dragTarget(w, 0, 49)).toBe(0);
+    expect(dragTarget(w, 0, 51)).toBe(1);
+    expect(dragTarget(w, 0, 151)).toBe(2);
+    expect(dragTarget(w, 0, 999)).toBe(3);
+    expect(dragTarget(w, 3, -51)).toBe(2);
+    expect(dragTarget(w, 3, -999)).toBe(0);
+    expect(dragTarget(w, 2, 0)).toBe(2);
+  });
+
+  it("dragTarget handles tabs of different widths", () => {
+    // Tab 0 (60 wide) dragged right: its right edge (60 + offset) passes tab 1's middle (160).
+    expect(dragTarget([60, 200, 100], 0, 99)).toBe(0);
+    expect(dragTarget([60, 200, 100], 0, 101)).toBe(1);
+    // Tab 2 (starts at 260) dragged left: its left edge passes tab 1's middle (160).
+    expect(dragTarget([60, 200, 100], 2, -99)).toBe(2);
+    expect(dragTarget([60, 200, 100], 2, -101)).toBe(1);
+  });
+
+  it("dragShift slides the tabs between the old and new place by the dragged width", () => {
+    // Dragging tab 1 (80 wide) to index 3: tabs 2 and 3 slide left.
+    expect([0, 1, 2, 3, 4].map((j) => dragShift(j, 1, 3, 80))).toEqual([0, 0, -80, -80, 0]);
+    // Dragging tab 3 to index 1: tabs 1 and 2 slide right.
+    expect([0, 1, 2, 3, 4].map((j) => dragShift(j, 3, 1, 80))).toEqual([0, 80, 80, 0, 0]);
+    expect(dragShift(2, 2, 2, 80)).toBe(0);
   });
 
   it("remapTabs follows a folder rename into every tab beneath it", () => {

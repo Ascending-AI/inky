@@ -44,8 +44,8 @@ Inky checks for updates on launch and from **Inky → Check for Updates…**.
 - **Quick Open** (⌘K) fuzzy-finds documents and recent files.
   **Search Library** (⌘⇧K) searches every document's text.
 - **Tabs**: opening a document opens it in a tab, and ⌘-click opens it in a
-  background tab. The tab bar appears once two are open, and tabs are
-  restored on relaunch.
+  background tab. The tab bar appears once two are open. Drag a tab to
+  reorder it (Esc cancels), and tabs are restored on relaunch.
 - **Breadcrumbs** in the toolbar show the folder path; each crumb lists that
   folder's documents.
 - **Paste as document** (⌘⇧V) turns copied Markdown into a new document.

@@ -105,6 +105,36 @@ export function moveTab(set: TabSet, id: string, toIndex: number) {
   set.tabs.splice(to, 0, tab);
 }
 
+/**
+ * Where a dragged tab lands. `widths` are the tabs' widths in order, `from`
+ * the dragged tab's index and `offset` how far (px) it has been dragged. A
+ * neighbour gives way once the dragged tab's leading edge passes its middle.
+ */
+export function dragTarget(widths: number[], from: number, offset: number): number {
+  let left = 0;
+  const starts = widths.map((w) => {
+    const s = left;
+    left += w;
+    return s;
+  });
+  const start = starts[from] + offset;
+  const end = start + widths[from];
+  let target = from;
+  for (let j = 0; j < widths.length; j++) {
+    const middle = starts[j] + widths[j] / 2;
+    if (j > from && end > middle) target++;
+    if (j < from && start < middle) target--;
+  }
+  return target;
+}
+
+/** How far (px) tab `j` slides aside while the tab at `from` hovers at `to`. */
+export function dragShift(j: number, from: number, to: number, width: number): number {
+  if (from < to && j > from && j <= to) return -width;
+  if (to < from && j >= to && j < from) return width;
+  return 0;
+}
+
 /** A file or folder moved/renamed: rewrite tab paths and their histories. */
 export function remapTabs(set: TabSet, from: string, to: string): boolean {
   let changed = false;
