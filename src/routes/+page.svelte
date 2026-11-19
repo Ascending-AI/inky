@@ -21,6 +21,7 @@
   import HighlightsPanel from "$lib/components/HighlightsPanel.svelte";
   import ConflictDialog from "$lib/components/ConflictDialog.svelte";
   import McpSetupDialog from "$lib/components/McpSetupDialog.svelte";
+  import ThemeEditor from "$lib/components/ThemeEditor.svelte";
   import ImagePreview from "$lib/components/ImagePreview.svelte";
   import ZoomViewer from "$lib/components/ZoomViewer.svelte";
   import * as Resizable from "$lib/components/ui/resizable/index.js";
@@ -432,3 +433,4 @@
 <LibrarySearch />
 <HistoryPanel />
 <McpSetupDialog />
+<ThemeEditor />

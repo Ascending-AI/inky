@@ -107,6 +107,21 @@ export function orderThemes(themes: readonly Theme[]): Theme[] {
   return [...BUILT_IN, ...READY_MADE, ...yours, ...custom];
 }
 
+const SECTIONS: [ThemeGroup, string][] = [
+  ["builtin", "Built-in"],
+  ["yours", "Your themes"],
+  ["custom", "Custom"],
+  ["readymade", "Ready-made"],
+];
+
+/** The theme list in labelled sections, as the theme pickers show it; empty sections left out. */
+export function themeSections(themes: readonly Theme[]): { label: string; items: Theme[] }[] {
+  return SECTIONS.map(([g, label]) => ({
+    label,
+    items: themes.filter((t) => themeGroup(t.id) === g),
+  })).filter((s) => s.items.length > 0);
+}
+
 export interface LoadedThemes {
   yours: Theme[];
   custom: Theme | null;

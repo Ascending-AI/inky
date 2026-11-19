@@ -28,7 +28,7 @@
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
   import Check from "@lucide/svelte/icons/check";
-  import { themeGroup } from "$lib/themes/library";
+  import { themeSections } from "$lib/themes/library";
   import SunMedium from "@lucide/svelte/icons/sun-medium";
   import Moon from "@lucide/svelte/icons/moon";
   import BookOpenText from "@lucide/svelte/icons/book-open-text";
@@ -79,22 +79,11 @@
     { mode: "editor", label: "Writing (⌘3)", icon: PenLine },
   ];
 
-  function themeSections() {
-    const defs: [string, string][] = [
-      ["builtin", "Built-in"],
-      ["yours", "Your themes"],
-      ["custom", "Custom"],
-      ["readymade", "Ready-made"],
-    ];
-    return defs
-      .map(([g, label]) => ({ label, items: app.themes.filter((t) => themeGroup(t.id) === g) }))
-      .filter((s) => s.items.length > 0);
-  }
-
   const ThemeIcon = $derived(
     app.themeKind === "dark" ? Moon : app.themeId === "book" ? BookOpenText : SunMedium,
   );
 
+  let readingOpen = $state(false);
   let editingTitle = $state(false);
   let titleDraft = $state("");
 
@@ -473,7 +462,7 @@
       <Tooltip.Content>Export PDF (⌘E)</Tooltip.Content>
     </Tooltip.Root>
 
-    <Popover.Root>
+    <Popover.Root bind:open={readingOpen}>
       <Popover.Trigger>
         {#snippet child({ props })}
           <Button {...props} variant="ghost" size="icon" title="Reading settings">
@@ -611,6 +600,23 @@
               Loading an image from the web tells its server you opened the document.
             </p>
           </div>
+          <div class="grid gap-2">
+            <span class="text-xs font-medium text-muted-foreground">Colour theme</span>
+            <div class="flex items-center justify-between gap-2">
+              <span class="min-w-0 truncate text-sm">{app.activeTheme.name}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-7 px-2 text-xs"
+                onclick={() => {
+                  readingOpen = false;
+                  app.openThemeEditor();
+                }}
+              >
+                Edit Themes…
+              </Button>
+            </div>
+          </div>
           {#if !isDefaultTypography(app.typography)}
             <Button
               variant="ghost"
@@ -634,7 +640,7 @@
         {/snippet}
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end" class="max-h-[60vh] overflow-y-auto">
-        {#each themeSections() as sec, i (sec.label)}
+        {#each themeSections(app.themes) as sec, i (sec.label)}
           {#if i > 0}<DropdownMenu.Separator />{/if}
           <DropdownMenu.Label class="text-xs text-muted-foreground">{sec.label}</DropdownMenu.Label>
           {#each sec.items as t (t.id)}
