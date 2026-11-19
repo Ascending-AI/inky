@@ -795,7 +795,7 @@ fn themes_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-fn list_themes(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+fn list_themes(app: tauri::AppHandle) -> Result<Vec<themes::ThemeFile>, String> {
     Ok(themes::list(&themes_dir(&app)?))
 }
 

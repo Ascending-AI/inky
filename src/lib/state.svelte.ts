@@ -16,6 +16,7 @@ import {
   activeOrFallback,
   customFile,
   editedTheme,
+  loadThemeFiles,
   orderThemes,
   slugFor,
   themeGroup,
@@ -536,26 +537,12 @@ class AppState {
 
   /** Read the saved themes and Custom; fall back to Light if the active theme is gone. */
   async loadThemes() {
-    const files = await invoke<string[]>("list_themes").catch(() => [] as string[]);
-    const list: Theme[] = [...BUILT_IN];
-    const seen = new Set<string>(list.map((t) => t.id));
-    for (const json of files) {
-      const r = parseTheme(json);
-      if (!r.ok) {
-        console.warn(`Skipped a theme file: ${r.error}`);
-        continue;
-      }
-      const id = r.theme.id;
-      if (id === "custom") {
-        this.customBasedOn = r.basedOn ?? null;
-        list.push({ ...r.theme, name: "Custom" });
-      } else if (themeGroup(id) !== "yours" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(id) || seen.has(id)) {
-        console.warn(`Skipped theme file with unusable id "${id}"`);
-      } else {
-        list.push(r.theme);
-      }
-      seen.add(id);
-    }
+    const files = await invoke<{ id: string; json: string }[]>("list_themes").catch(() => []);
+    const loaded = loadThemeFiles(files);
+    for (const w of loaded.warnings) console.warn(w);
+    this.customBasedOn = loaded.customBasedOn;
+    const list: Theme[] = [...BUILT_IN, ...loaded.yours];
+    if (loaded.custom) list.push(loaded.custom);
     this.#setThemes(list);
     const { missing } = activeOrFallback(this.themes, this.themeId);
     if (missing) {
@@ -572,6 +559,13 @@ class AppState {
     this.setTheme("custom");
     if (this.#customTimer) clearTimeout(this.#customTimer);
     this.#customTimer = setTimeout(() => this.#writeCustom(), 300);
+  }
+
+  /** Write a pending Custom save now (before the app quits). */
+  flushCustom() {
+    if (!this.#customTimer) return;
+    clearTimeout(this.#customTimer);
+    this.#writeCustom();
   }
 
   #writeCustom() {
@@ -1526,6 +1520,7 @@ class AppState {
    * discard them and go on (when `quitting`: quit anyway), or stay.
    */
   async #leave({ quitting = false } = {}): Promise<boolean> {
+    if (quitting) this.flushCustom();
     this.commitInPlaceEdit?.();
     const flushed = await this.#flush();
     if (flushed !== "failed") return flushed === "saved";

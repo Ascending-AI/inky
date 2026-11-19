@@ -5,6 +5,7 @@ import {
   beginEdit,
   customFile,
   editedTheme,
+  loadThemeFiles,
   slugFor,
   uniqueName,
 } from "../src/lib/themes/library";
@@ -97,5 +98,31 @@ describe("activeOrFallback", () => {
     const ok = activeOrFallback([...BUILT_IN], "dark");
     expect(ok.missing).toBe(false);
     expect(ok.theme.id).toBe("dark");
+  });
+});
+
+describe("loadThemeFiles", () => {
+  const file = (id: string, name: string, extra = "") =>
+    ({ id, json: `{"inkyTheme":1,"id":"${id}","name":"${name}","kind":"light",${extra}"colors":{"page":"#fff","text":"#000","accent":"#00f","sidebar":"#eee","border":"#ddd"}}` });
+  it("renames a name that clashes with a built-in or an earlier file", () => {
+    const r = loadThemeFiles([file("a", "Dark"), file("b", "dark"), file("c", "Fjord")]);
+    expect(r.yours.map((t) => t.name)).toEqual(["Dark 2", "dark 3", "Fjord"]);
+  });
+  it("uses the file name as the id, not the id inside", () => {
+    const f = { id: "a", json: file("b", "X").json };
+    const r = loadThemeFiles([f]);
+    expect(r.yours[0].id).toBe("a");
+  });
+  it("skips reserved ids and invalid files, and reads Custom", () => {
+    const r = loadThemeFiles([
+      file("light", "Mine"),
+      file("rm-x", "Mine"),
+      { id: "bad", json: "nope" },
+      file("custom", "Whatever", '"basedOn":"a",'),
+    ]);
+    expect(r.yours).toEqual([]);
+    expect(r.warnings).toHaveLength(3);
+    expect(r.custom?.name).toBe("Custom");
+    expect(r.customBasedOn).toBe("a");
   });
 });

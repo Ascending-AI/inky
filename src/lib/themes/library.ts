@@ -6,6 +6,7 @@ import { BUILT_IN, LIGHT } from "./builtin";
 import { READY_MADE } from "./readymade";
 import {
   MAIN_KEYS,
+  parseTheme,
   serializeTheme,
   type ExactColors,
   type MainColors,
@@ -104,4 +105,46 @@ export function orderThemes(themes: readonly Theme[]): Theme[] {
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   const custom = themes.filter((t) => t.id === "custom");
   return [...BUILT_IN, ...READY_MADE, ...yours, ...custom];
+}
+
+export interface LoadedThemes {
+  yours: Theme[];
+  custom: Theme | null;
+  customBasedOn: string | null;
+  warnings: string[];
+}
+
+const VALID_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/**
+ * Clean the theme files read from disk. The file name (stem) is the id,
+ * whatever the file says; unusable ids and invalid files are skipped with a
+ * warning; names that clash with another theme get " 2", " 3"… appended.
+ */
+export function loadThemeFiles(files: readonly { id: string; json: string }[]): LoadedThemes {
+  const out: LoadedThemes = { yours: [], custom: null, customBasedOn: null, warnings: [] };
+  const names = [...BUILT_IN, ...READY_MADE].map((t) => t.name);
+  names.push("Custom");
+  const ids = new Set<string>([...BUILT_IN, ...READY_MADE].map((t) => t.id));
+  for (const f of files) {
+    const r = parseTheme(f.json);
+    if (!r.ok) {
+      out.warnings.push(`Skipped ${f.id}.json: ${r.error}`);
+      continue;
+    }
+    if (f.id === "custom") {
+      out.custom = { ...r.theme, id: "custom", name: "Custom" };
+      out.customBasedOn = r.basedOn ?? null;
+      continue;
+    }
+    if (!VALID_ID.test(f.id) || themeGroup(f.id) !== "yours" || ids.has(f.id)) {
+      out.warnings.push(`Skipped ${f.id}.json: unusable theme id`);
+      continue;
+    }
+    ids.add(f.id);
+    const name = uniqueName(r.theme.name, names);
+    names.push(name);
+    out.yours.push({ ...r.theme, id: f.id, name });
+  }
+  return out;
 }

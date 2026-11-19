@@ -15,8 +15,15 @@ pub fn valid_id(id: &str) -> bool {
     first_ok && b[1..].iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
 }
 
-/// Contents of every `*.json` file directly in `dir`, sorted by file name.
-pub fn list(dir: &Path) -> Vec<String> {
+/// A theme file: its name without `.json` (the theme's id) and its text.
+#[derive(serde::Serialize, Debug, PartialEq)]
+pub struct ThemeFile {
+    pub id: String,
+    pub json: String,
+}
+
+/// Every `<valid id>.json` file directly in `dir`, sorted by file name.
+pub fn list(dir: &Path) -> Vec<ThemeFile> {
     let Ok(entries) = fs::read_dir(dir) else { return Vec::new() };
     let mut files: Vec<_> = entries
         .filter_map(Result::ok)
@@ -24,7 +31,16 @@ pub fn list(dir: &Path) -> Vec<String> {
         .map(|e| e.path())
         .collect();
     files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
-    files.iter().filter_map(|p| fs::read_to_string(p).ok()).collect()
+    files
+        .iter()
+        .filter_map(|p| {
+            let id = p.file_stem()?.to_str()?;
+            if !valid_id(id) {
+                return None;
+            }
+            Some(ThemeFile { id: id.to_string(), json: fs::read_to_string(p).ok()? })
+        })
+        .collect()
 }
 
 /// Atomically write `<id>.json` (write-then-rename).
@@ -78,9 +94,9 @@ mod tests {
         let d = tmp("rt");
         write(&d, "b", r#"{"n":2}"#).unwrap();
         write(&d, "a", r#"{"n":1}"#).unwrap();
-        assert_eq!(list(&d), vec![r#"{"n":1}"#, r#"{"n":2}"#]);
+        assert_eq!(list(&d).iter().map(|f| f.json.as_str()).collect::<Vec<_>>(), vec![r#"{"n":1}"#, r#"{"n":2}"#]);
         write(&d, "a", r#"{"n":3}"#).unwrap();
-        assert_eq!(list(&d)[0], r#"{"n":3}"#);
+        assert_eq!(list(&d)[0].json, r#"{"n":3}"#);
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -120,7 +136,8 @@ mod tests {
         write(&d, "a", "{}").unwrap();
         fs::write(d.join("note.txt"), "x").unwrap();
         fs::create_dir(d.join("sub.json")).unwrap();
-        assert_eq!(list(&d), vec!["{}"]);
+        fs::write(d.join("Bad Name.json"), "{}").unwrap();
+        assert_eq!(list(&d), vec![ThemeFile { id: "a".into(), json: "{}".into() }]);
         assert!(list(&d.join("missing")).is_empty());
         let _ = fs::remove_dir_all(&d);
     }
