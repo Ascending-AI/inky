@@ -11,6 +11,7 @@ import {
   withCustom,
 } from "../src/lib/themes/library";
 import { parseTheme } from "../src/lib/themes/model";
+import { READY_MADE } from "../src/lib/themes/readymade";
 
 const ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
@@ -135,7 +136,7 @@ describe("withCustom", () => {
   it("adds Custom last when absent", () => {
     const list = [...BUILT_IN, mine];
     const out = withCustom(list, custom("#111111"));
-    expect(out.map((t) => t.id)).toEqual([...BUILT_IN.map((t) => t.id), "mine", "custom"]);
+    expect(out.map((t) => t.id)).toEqual([...BUILT_IN, ...READY_MADE].map((t) => t.id).concat("mine", "custom"));
     expect(list).toHaveLength(BUILT_IN.length + 1);
   });
   it("replaces Custom in place, leaving the other entries untouched", () => {

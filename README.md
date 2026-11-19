@@ -88,8 +88,13 @@ Inky checks for updates on launch and from **Inky → Check for Updates…**.
   typeface (San Francisco, New York, Charter, Iowan, Avenir), line and
   paragraph spacing, and a justified, hyphenated book layout. Pinch to zoom
   the text.
-- **Themes**: Light, Dark (anthracite, not black) and Book (warm paper and
-  serif type).
+- **Themes**: Light, Dark (anthracite, not black) and Book (warm paper
+  colours), plus two dozen ready-made themes. Pick one from the toolbar or
+  **View → Theme**. **Edit Themes…** makes your own, and **Custom** holds your
+  last tweak. Themes are colours only: Book's serif type is now a font choice in
+  Reading settings. Themes are JSON files in Inky's settings folder, and you can
+  import and export them. Ready-made palettes are credited in
+  [THEME-CREDITS.md](THEME-CREDITS.md).
 
 ### Writing
 
@@ -252,8 +257,9 @@ Inside your library, next to each document:
 | `assets/` | Images pasted into documents |
 
 In `~/Library/Application Support/com.inky.app/`: `config.json` (library
-folder, recent files, MCP token), `highlights.json`, and `read-baselines/` (the
-"last read" copies behind *What changed*).
+folder, recent files, MCP token), `highlights.json`, `themes/` (your themes
+and Custom, one JSON file each), and `read-baselines/` (the "last read" copies
+behind *What changed*).
 
 ## Development
 
