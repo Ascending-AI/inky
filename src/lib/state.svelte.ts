@@ -11,7 +11,17 @@ import { EditorView } from "@codemirror/view";
 import type { OpenRequest, PathChange, TreeNode, ViewMode } from "./types";
 import { BUILT_IN, LIGHT } from "./themes/builtin";
 import { applyThemeTo } from "./themes/apply";
-import type { Theme } from "./themes/model";
+import { parseTheme, serializeTheme, type Theme } from "./themes/model";
+import {
+  activeOrFallback,
+  customFile,
+  editedTheme,
+  orderThemes,
+  slugFor,
+  themeGroup,
+  uniqueName,
+  type EditState,
+} from "./themes/library";
 import { WELCOME_DOC, MERMAID_TEMPLATE } from "./templates";
 import { extractToc, type TocEntry } from "./markdown";
 import { isImagePath, isInside, parsePathList, remapPath } from "./paths";
@@ -154,6 +164,9 @@ class AppState {
   /** Bumped on every apply; things that render colours (diagrams) redo on it. */
   themeVersion = $state(0);
   themeEditorVisible = $state(false);
+  /** The theme the saved Custom started from (its `basedOn`). */
+  customBasedOn = $state<string | null>(null);
+  #customTimer: ReturnType<typeof setTimeout> | null = null;
   viewMode = $state<ViewMode>("split");
   fontScale = $state(1);
   readingWidth = $state<ReadingWidth>("default");
@@ -337,6 +350,7 @@ class AppState {
     const storedColor = localStorage.getItem("inky.highlightColor");
     if (isColor(storedColor)) this.highlightColor = storedColor;
     this.highlightStore = parseStore(await invoke<string>("read_highlights").catch(() => ""));
+    await this.loadThemes();
     this.applyTheme();
     this.pushThemeMenu();
     this.applyReadingPrefs();
@@ -505,21 +519,178 @@ class AppState {
 
   /** Rebuild the native Theme submenu from the theme list. */
   pushThemeMenu() {
-    const group = (id: string) =>
-      id === "custom"
-        ? "custom"
-        : id.startsWith("rm-")
-          ? "readymade"
-          : BUILT_IN.some((t) => t.id === id)
-            ? "builtin"
-            : "yours";
     const entries = this.themes.map((t) => ({
       id: t.id,
       name: t.name,
-      group: group(t.id),
+      group: themeGroup(t.id),
       checked: t.id === this.themeId,
     }));
     invoke("set_theme_menu", { entries }).catch(() => {});
+  }
+
+  /** Replace the theme list (ordered) and tell the native menu. */
+  #setThemes(list: Theme[]) {
+    this.themes = orderThemes(list);
+    this.pushThemeMenu();
+  }
+
+  /** Read the saved themes and Custom; fall back to Light if the active theme is gone. */
+  async loadThemes() {
+    const files = await invoke<string[]>("list_themes").catch(() => [] as string[]);
+    const list: Theme[] = [...BUILT_IN];
+    const seen = new Set<string>(list.map((t) => t.id));
+    for (const json of files) {
+      const r = parseTheme(json);
+      if (!r.ok) {
+        console.warn(`Skipped a theme file: ${r.error}`);
+        continue;
+      }
+      const id = r.theme.id;
+      if (id === "custom") {
+        this.customBasedOn = r.basedOn ?? null;
+        list.push({ ...r.theme, name: "Custom" });
+      } else if (themeGroup(id) !== "yours" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(id) || seen.has(id)) {
+        console.warn(`Skipped theme file with unusable id "${id}"`);
+      } else {
+        list.push(r.theme);
+      }
+      seen.add(id);
+    }
+    this.#setThemes(list);
+    const { missing } = activeOrFallback(this.themes, this.themeId);
+    if (missing) {
+      toast.info(`Theme "${this.themeId}" is no longer available. Using Light.`);
+      this.themeId = "light";
+    }
+  }
+
+  /** Make an edit state the active Custom theme and save it (debounced). */
+  applyEdit(s: EditState) {
+    const theme = editedTheme(s);
+    if (s.start.id !== "custom") this.customBasedOn = s.start.id;
+    this.#setThemes([...this.themes.filter((t) => t.id !== "custom"), theme]);
+    this.setTheme("custom");
+    if (this.#customTimer) clearTimeout(this.#customTimer);
+    this.#customTimer = setTimeout(() => this.#writeCustom(), 300);
+  }
+
+  #writeCustom() {
+    this.#customTimer = null;
+    const custom = this.themes.find((t) => t.id === "custom");
+    if (!custom) return;
+    const json = customFile(custom, this.customBasedOn ?? "light");
+    invoke("write_theme", { id: "custom", json }).catch((e) => toast.error(`Could not save Custom: ${e}`));
+  }
+
+  async #writeTheme(t: Theme): Promise<boolean> {
+    try {
+      await invoke("write_theme", { id: t.id, json: serializeTheme(t) });
+      return true;
+    } catch (e) {
+      toast.error(`Could not save theme: ${e}`);
+      return false;
+    }
+  }
+
+  #putTheme(t: Theme) {
+    this.#setThemes([...this.themes.filter((x) => x.id !== t.id), t]);
+  }
+
+  /** Overwrite the saved theme Custom was based on with Custom's colours. */
+  async saveTheme() {
+    const custom = this.themes.find((t) => t.id === "custom");
+    const base = this.themes.find((t) => t.id === this.customBasedOn);
+    if (!custom || !base || themeGroup(base.id) !== "yours") return;
+    const saved: Theme = { ...custom, id: base.id, name: base.name };
+    if (!(await this.#writeTheme(saved))) return;
+    this.#putTheme(saved);
+    this.setTheme(saved.id);
+  }
+
+  /** Save the shown theme as a new theme of yours; it becomes active. */
+  async saveThemeAs(name: string) {
+    const source = this.activeTheme;
+    const others = this.themes.filter((t) => t.id !== "custom");
+    const id = slugFor(name, new Set(this.themes.map((t) => t.id)));
+    const saved: Theme = {
+      ...source,
+      id,
+      name: uniqueName(name, others.map((t) => t.name)),
+    };
+    if (!(await this.#writeTheme(saved))) return;
+    this.#putTheme(saved);
+    if (source.id === "custom") {
+      this.customBasedOn = id;
+      this.#writeCustom();
+    }
+    this.setTheme(id);
+  }
+
+  async renameTheme(id: string, name: string) {
+    const t = this.themes.find((x) => x.id === id);
+    if (!t || themeGroup(id) !== "yours") return;
+    const others = this.themes.filter((x) => x.id !== id && x.id !== "custom");
+    const renamed: Theme = { ...t, name: uniqueName(name, others.map((x) => x.name)) };
+    if (!(await this.#writeTheme(renamed))) return;
+    this.#putTheme(renamed);
+  }
+
+  async duplicateTheme(id: string) {
+    const t = this.themes.find((x) => x.id === id);
+    if (!t) return;
+    const copy: Theme = {
+      ...t,
+      id: slugFor(`${t.name} copy`, new Set(this.themes.map((x) => x.id))),
+      name: uniqueName(`${t.name} copy`, this.themes.map((x) => x.name)),
+    };
+    if (!(await this.#writeTheme(copy))) return;
+    this.#putTheme(copy);
+  }
+
+  async deleteTheme(id: string) {
+    if (themeGroup(id) !== "yours") return;
+    try {
+      await invoke("delete_theme", { id });
+    } catch (e) {
+      toast.error(`Could not delete theme: ${e}`);
+      return;
+    }
+    this.#setThemes(this.themes.filter((t) => t.id !== id));
+    if (this.themeId === id) this.setTheme("light");
+  }
+
+  async importTheme() {
+    let json: string | null;
+    try {
+      json = await invoke<string | null>("import_theme_file");
+    } catch (e) {
+      toast.error(`Could not import theme: ${e}`);
+      return;
+    }
+    if (json === null) return;
+    const r = parseTheme(json);
+    if (!r.ok) {
+      toast.error(`Could not import theme: ${r.error}`);
+      return;
+    }
+    const imported: Theme = {
+      ...r.theme,
+      id: slugFor(r.theme.name, new Set(this.themes.map((t) => t.id))),
+      name: uniqueName(r.theme.name, this.themes.map((t) => t.name)),
+    };
+    if (!(await this.#writeTheme(imported))) return;
+    this.#putTheme(imported);
+    this.setTheme(imported.id);
+    if (r.warnings.length) toast.warning(`Imported with warnings: ${r.warnings.join("; ")}`);
+  }
+
+  async exportTheme(t: Theme) {
+    try {
+      const saved = await invoke<boolean>("export_theme_file", { name: t.name, json: serializeTheme(t) });
+      if (saved) toast.success(`Exported ${t.name}`);
+    } catch (e) {
+      toast.error(`Could not export theme: ${e}`);
+    }
   }
 
   openThemeEditor() {

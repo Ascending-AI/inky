@@ -27,6 +27,8 @@
   import FileDown from "@lucide/svelte/icons/file-down";
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
+  import Check from "@lucide/svelte/icons/check";
+  import { themeGroup } from "$lib/themes/library";
   import SunMedium from "@lucide/svelte/icons/sun-medium";
   import Moon from "@lucide/svelte/icons/moon";
   import BookOpenText from "@lucide/svelte/icons/book-open-text";
@@ -76,6 +78,18 @@
     { mode: "split", label: "Split (⌘2)", icon: Columns2 },
     { mode: "editor", label: "Writing (⌘3)", icon: PenLine },
   ];
+
+  function themeSections() {
+    const defs: [string, string][] = [
+      ["builtin", "Built-in"],
+      ["yours", "Your themes"],
+      ["custom", "Custom"],
+      ["readymade", "Ready-made"],
+    ];
+    return defs
+      .map(([g, label]) => ({ label, items: app.themes.filter((t) => themeGroup(t.id) === g) }))
+      .filter((s) => s.items.length > 0);
+  }
 
   const ThemeIcon = $derived(
     app.themeKind === "dark" ? Moon : app.themeId === "book" ? BookOpenText : SunMedium,
@@ -619,16 +633,24 @@
           </Button>
         {/snippet}
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="end">
-        <DropdownMenu.Item onclick={() => app.setTheme("light")}>
-          <SunMedium class="size-4" /> Light
-        </DropdownMenu.Item>
-        <DropdownMenu.Item onclick={() => app.setTheme("dark")}>
-          <Moon class="size-4" /> Dark
-        </DropdownMenu.Item>
-        <DropdownMenu.Item onclick={() => app.setTheme("book")}>
-          <BookOpenText class="size-4" /> Book
-        </DropdownMenu.Item>
+      <DropdownMenu.Content align="end" class="max-h-[60vh] overflow-y-auto">
+        {#each themeSections() as sec, i (sec.label)}
+          {#if i > 0}<DropdownMenu.Separator />{/if}
+          <DropdownMenu.Label class="text-xs text-muted-foreground">{sec.label}</DropdownMenu.Label>
+          {#each sec.items as t (t.id)}
+            <DropdownMenu.Item onclick={() => app.setTheme(t.id)}>
+              <span class="flex gap-0.5">
+                {#each [t.colors.page, t.colors.text, t.colors.accent] as c}
+                  <span class="size-2.5 rounded-full border border-black/15" style="background:{c}"></span>
+                {/each}
+              </span>
+              <span class="flex-1">{t.name}</span>
+              {#if t.id === app.themeId}<Check class="size-4" />{/if}
+            </DropdownMenu.Item>
+          {/each}
+        {/each}
+        <DropdownMenu.Separator />
+        <DropdownMenu.Item onclick={() => app.openThemeEditor()}>Edit Themes…</DropdownMenu.Item>
       </DropdownMenu.Content>
     </DropdownMenu.Root>
 
