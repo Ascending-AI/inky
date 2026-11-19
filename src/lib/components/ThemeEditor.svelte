@@ -159,8 +159,10 @@
 </script>
 
 <Dialog.Root bind:open={app.themeEditorVisible}>
-  <Dialog.Content class="flex h-[640px] max-h-[calc(100vh-2rem)] gap-0 overflow-hidden p-0 sm:max-w-[960px]">
-    <div class="flex w-[300px] shrink-0 flex-col border-r">
+  <Dialog.Content
+    class="flex h-[calc(100vh-3rem)] w-[calc(100vw-3rem)] max-w-none gap-0 overflow-hidden p-0 sm:max-w-none"
+  >
+    <div class="flex w-[320px] shrink-0 flex-col border-r">
       <ScrollArea class="min-h-0 flex-1">
         <div class="grid gap-5 p-4">
           <section class="grid gap-1.5">
@@ -192,7 +194,7 @@
                   </Button>
                 {/snippet}
               </DropdownMenu.Trigger>
-              <DropdownMenu.Content align="start" class="max-h-[60vh] w-[268px] overflow-y-auto">
+              <DropdownMenu.Content align="start" class="max-h-[60vh] w-[288px] overflow-y-auto">
                 {#each themeSections(app.themes) as sec, i (sec.label)}
                   {#if i > 0}<DropdownMenu.Separator />{/if}
                   <DropdownMenu.Label class="text-xs text-muted-foreground">{sec.label}</DropdownMenu.Label>

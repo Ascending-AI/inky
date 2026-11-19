@@ -24,13 +24,12 @@
   ];
 </script>
 
-<!-- Fixed sample content: not interactive. -->
+<!-- Fixed sample content: not interactive, but the document scrolls. -->
 <div
   bind:this={root}
-  inert
   class="flex h-full min-h-0 overflow-hidden rounded-lg border bg-background text-foreground shadow-sm"
 >
-  <aside class="flex w-44 shrink-0 flex-col gap-px border-r border-sidebar-border bg-sidebar px-2 py-3 text-sidebar-foreground">
+  <aside inert class="flex w-56 shrink-0 flex-col gap-px border-r border-sidebar-border bg-sidebar px-2 py-3 text-sidebar-foreground">
     {#each tree as n (n.name)}
       <div
         class="flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px]
@@ -49,7 +48,7 @@
   </aside>
 
   <div class="flex min-w-0 flex-1 flex-col">
-    <div class="tab-strip shrink-0">
+    <div inert class="tab-strip shrink-0">
       {#each ["Agent memory survey", "Reading research", "Weekly notes"] as name, i (name)}
         <div class="tab" aria-selected={i === 0}>
           <span class="tab-sep"></span>
@@ -58,8 +57,8 @@
       {/each}
     </div>
 
-    <div class="sample-doc min-h-0 flex-1 overflow-hidden px-8 py-6">
-      <article class="prose-doc">
+    <div class="sample-doc min-h-0 flex-1 overflow-y-auto px-10 py-8">
+      <article inert class="prose-doc">
         <h1>Agent memory survey</h1>
         <p>
           Long-running agents forget. This survey compares <a href="#sample">five approaches</a> to
@@ -81,15 +80,35 @@
   <span class="hljs-attr">"approach"</span>: <span class="hljs-string">"retrieval"</span>,
   <span class="hljs-attr">"recall"</span>: <span class="hljs-number">0.82</span>
 {"}"}</code></pre>
+        <h2>What we recommend</h2>
+        <p>
+          Start with retrieval over the raw transcript, and add summaries only where the context
+          window runs short. Three things decide whether it works:
+        </p>
+        <ul>
+          <li>how the agent decides <strong>when</strong> to look things up;</li>
+          <li>how results are ranked against the current task;</li>
+          <li>what is <em>forgotten</em> on purpose, and when.</li>
+        </ul>
+        <h3>Open questions</h3>
+        <ol>
+          <li>Does recall hold up past a day of work?</li>
+          <li>Which mistakes come from retrieval, and which from the model? See the
+            <a href="#sample">error analysis</a>.</li>
+        </ol>
+        <hr />
+        <p>
+          Written for the reading group, with notes from the <code>memory-evals</code> repository.
+        </p>
       </article>
     </div>
   </div>
 </div>
 
 <style>
-  /* A miniature: smaller type and the full width of the pane. */
+  /* A slightly smaller page at a normal reading width. */
   .sample-doc {
-    --prose-scale: 0.8;
-    --prose-width: none;
+    --prose-scale: 0.9;
+    --prose-width: 44rem;
   }
 </style>
