@@ -3,7 +3,8 @@ import markedKatex from "marked-katex-extension";
 import markedFootnote from "marked-footnote";
 import DOMPurify from "dompurify";
 import { highlightCode } from "./codehighlight";
-import type { ThemeName } from "./types";
+import { resolveColor } from "./themes/colors";
+import { resolveTheme, type Theme } from "./themes/model";
 
 const marked = new Marked({
   gfm: true,
@@ -295,20 +296,42 @@ function loadMermaid(): Promise<Mermaid> {
   return (mermaidPromise ??= import("mermaid").then((m) => m.default));
 }
 
-function configureMermaid(mermaid: Mermaid, theme: ThemeName) {
-  const mTheme = theme === "dark" ? "dark" : theme === "book" ? "neutral" : "default";
-  if (mermaidTheme === mTheme) return;
-  mermaidTheme = mTheme;
+/** A theme value as a plain colour: `var()` references (the built-in tab strips) read off <html>. */
+function plainColor(value: string, fallback: string): string {
+  const style = getComputedStyle(document.documentElement);
+  const flat = value.replace(/var\((--[\w-]+)\)/g, (_, name: string) => style.getPropertyValue(name).trim());
+  return resolveColor(flat) ?? fallback;
+}
+
+function configureMermaid(mermaid: Mermaid, theme: Theme) {
+  const vars = resolveTheme(theme);
+  const key = `${theme.id}|${JSON.stringify(vars)}`;
+  if (mermaidTheme === key) return;
+  mermaidTheme = key;
+  const c = (prop: string, fallback: string) => plainColor(vars[prop] ?? fallback, fallback);
+  const text = c("--foreground", "#000000");
   mermaid.initialize({
     startOnLoad: false,
-    theme: mTheme as "dark" | "neutral" | "default",
+    theme: "base",
+    themeVariables: {
+      darkMode: theme.kind === "dark",
+      background: c("--background", "#ffffff"),
+      primaryColor: c("--muted", "#f4f4f5"),
+      primaryTextColor: text,
+      primaryBorderColor: c("--muted-foreground", "#71717a"),
+      lineColor: c("--muted-foreground", "#71717a"),
+      textColor: text,
+      secondaryColor: c("--accent", "#f4f4f5"),
+      tertiaryColor: c("--sidebar", "#fafafa"),
+      fontFamily: "ui-sans-serif, -apple-system, sans-serif",
+    },
     securityLevel: "strict",
     fontFamily: "ui-sans-serif, -apple-system, sans-serif",
   });
 }
 
 /** Render every mermaid placeholder inside `container` into inline SVG. */
-export async function renderMermaidBlocks(container: HTMLElement, theme: ThemeName) {
+export async function renderMermaidBlocks(container: HTMLElement, theme: Theme) {
   const blocks = container.querySelectorAll<HTMLElement>(".mermaid-block[data-mermaid]");
   if (blocks.length === 0) return;
   const mermaid = await loadMermaid();

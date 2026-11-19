@@ -242,7 +242,8 @@
     html;
     // A re-render replaces the code blocks the Copy button pointed at.
     codeCopy = null;
-    const theme = app.theme;
+    const theme = app.activeTheme;
+    app.themeVersion;
     app.commentThreads;
     if (!container) return;
     tick().then(async () => {
@@ -1277,7 +1278,8 @@
   }
 
   $effect(() => {
-    app.theme;
+    app.themeId;
+    app.themeVersion;
     resetMermaidTheme();
     // Force re-render of mermaid blocks with the new theme.
     untrack(() => {

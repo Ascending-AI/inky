@@ -7,5 +7,5 @@
   let { children } = $props();
 </script>
 
-<Toaster theme={app.theme === "dark" ? "dark" : "light"} position="bottom-right" />
+<Toaster theme={app.themeKind} position="bottom-right" />
 {@render children()}

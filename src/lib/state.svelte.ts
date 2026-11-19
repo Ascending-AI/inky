@@ -8,7 +8,10 @@ import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { toast } from "svelte-sonner";
 import { EditorView } from "@codemirror/view";
-import type { OpenRequest, PathChange, ThemeName, TreeNode, ViewMode } from "./types";
+import type { OpenRequest, PathChange, TreeNode, ViewMode } from "./types";
+import { BUILT_IN, LIGHT } from "./themes/builtin";
+import { applyThemeTo } from "./themes/apply";
+import type { Theme } from "./themes/model";
 import { WELCOME_DOC, MERMAID_TEMPLATE } from "./templates";
 import { extractToc, type TocEntry } from "./markdown";
 import { isImagePath, isInside, parsePathList, remapPath } from "./paths";
@@ -74,8 +77,6 @@ export interface CommentDraft {
 }
 
 export type { TocEntry };
-
-const THEMES: ThemeName[] = ["light", "dark", "book"];
 
 export { FONT_SCALES };
 
@@ -146,7 +147,12 @@ class AppState {
   viewerOpen = $derived(this.imagePath !== null || this.mediaView !== null);
   content = $state("");
   savedContent = $state("");
-  theme = $state<ThemeName>("light");
+  themeId = $state("light");
+  themes = $state<Theme[]>([...BUILT_IN]);
+  activeTheme = $derived(this.themes.find((t) => t.id === this.themeId) ?? LIGHT);
+  themeKind = $derived(this.activeTheme.kind);
+  /** Bumped on every apply; things that render colours (diagrams) redo on it. */
+  themeVersion = $state(0);
   viewMode = $state<ViewMode>("split");
   fontScale = $state(1);
   readingWidth = $state<ReadingWidth>("default");
@@ -309,15 +315,16 @@ class AppState {
   #autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   async init() {
-    const storedTheme = localStorage.getItem("inky.theme") as ThemeName | null;
-    if (storedTheme && THEMES.includes(storedTheme)) this.theme = storedTheme;
+    const storedTheme = localStorage.getItem("inky.theme");
+    if (storedTheme) this.themeId = storedTheme;
     const storedView = localStorage.getItem("inky.viewMode") as ViewMode | null;
     if (storedView) this.viewMode = storedView;
     const storedScale = parseFloat(localStorage.getItem("inky.fontScale") ?? "");
     if (Number.isFinite(storedScale)) this.fontScale = clampScale(storedScale);
     const storedWidth = localStorage.getItem("inky.readingWidth") as ReadingWidth | null;
     if (storedWidth && storedWidth in READING_WIDTHS) this.readingWidth = storedWidth;
-    this.typography = loadTypography();
+    this.typography = loadTypography(this.themeId);
+    saveTypography(this.typography); // settles a legacy "theme" typeface for good
     this.tocVisible = localStorage.getItem("inky.tocVisible") === "true";
     this.syncScroll = localStorage.getItem("inky.syncScroll") !== "false";
     this.sidebarVisible = localStorage.getItem("inky.sidebar") !== "false";
@@ -472,9 +479,9 @@ class AppState {
     const checks: [string, boolean][] = [
       ["sync_scroll", this.syncScroll],
       ["focus_mode", this.focusMode],
-      ["theme_light", this.theme === "light"],
-      ["theme_dark", this.theme === "dark"],
-      ["theme_book", this.theme === "book"],
+      ["theme_light", this.themeId === "light"],
+      ["theme_dark", this.themeId === "dark"],
+      ["theme_book", this.themeId === "book"],
       ...Object.keys(READING_WIDTHS).map(
         (k): [string, boolean] => [`width_${k}`, this.readingWidth === k],
       ),
@@ -485,13 +492,13 @@ class AppState {
   }
 
   applyTheme() {
-    document.documentElement.classList.remove(...THEMES);
-    document.documentElement.classList.add(this.theme);
-    localStorage.setItem("inky.theme", this.theme);
+    applyThemeTo(document.documentElement, this.activeTheme);
+    localStorage.setItem("inky.theme", this.themeId);
+    this.themeVersion++;
   }
 
-  setTheme(theme: ThemeName) {
-    this.theme = theme;
+  setTheme(id: string) {
+    this.themeId = id;
     this.applyTheme();
     this.syncMenuChecks();
   }

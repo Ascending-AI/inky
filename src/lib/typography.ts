@@ -1,15 +1,20 @@
 /**
  * Reading typography: typeface pairing, line spacing, paragraph spacing and
  * a book layout (justified, hyphenated). Every option is applied as CSS
- * custom properties on the root element; "theme" values remove the property
- * so the active theme's own defaults show through.
+ * custom properties on the root element; "theme" spacing values remove the
+ * property so the stylesheet's defaults show through. Typography is never part
+ * of a colour theme.
  *
  * Typefaces are macOS system fonts, so nothing has to be downloaded and the
  * app stays offline.
  */
 
 export const TYPEFACES = {
-  theme: { label: "Theme", body: null, heading: null },
+  default: {
+    label: "Default",
+    body: `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif`,
+    heading: `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif`,
+  },
   sans: {
     label: "San Francisco",
     body: `-apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif`,
@@ -62,7 +67,7 @@ export interface Typography {
 }
 
 export const DEFAULT_TYPOGRAPHY: Typography = {
-  typeface: "theme",
+  typeface: "default",
   lineSpacing: "theme",
   paraSpacing: "theme",
   justify: false,
@@ -70,8 +75,12 @@ export const DEFAULT_TYPOGRAPHY: Typography = {
 
 const STORAGE_KEY = "inky.typography";
 
-/** Stored settings, with anything unknown (renamed options, junk) reset. */
-export function loadTypography(): Typography {
+/**
+ * Stored settings, with anything unknown (renamed options, junk) reset. The old
+ * "theme" typeface meant "whatever the theme says": serif for Book, system
+ * otherwise, so it maps by the stored theme id.
+ */
+export function loadTypography(storedThemeId?: string): Typography {
   let raw: Partial<Typography> = {};
   try {
     raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") ?? {};
@@ -79,11 +88,16 @@ export function loadTypography(): Typography {
     // Fall through to defaults.
   }
   return {
-    typeface: raw.typeface && raw.typeface in TYPEFACES ? raw.typeface : "theme",
+    typeface: legacyTypeface(raw.typeface, storedThemeId),
     lineSpacing: raw.lineSpacing && raw.lineSpacing in LINE_SPACINGS ? raw.lineSpacing : "theme",
     paraSpacing: raw.paraSpacing && raw.paraSpacing in PARA_SPACINGS ? raw.paraSpacing : "theme",
     justify: raw.justify === true,
   };
+}
+
+function legacyTypeface(stored: unknown, storedThemeId?: string): Typeface {
+  if (stored === "theme") return storedThemeId === "book" ? "iowan" : "default";
+  return typeof stored === "string" && stored in TYPEFACES ? (stored as Typeface) : "default";
 }
 
 export function saveTypography(t: Typography) {
@@ -94,7 +108,7 @@ export function saveTypography(t: Typography) {
   }
 }
 
-/** Root CSS properties for `t`; `null` means "remove, use the theme's". */
+/** Root CSS properties for `t`; `null` means "remove, use the stylesheet's". */
 export function typographyVars(t: Typography): Record<string, string | null> {
   const face = TYPEFACES[t.typeface];
   return {

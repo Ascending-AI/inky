@@ -78,7 +78,7 @@
   ];
 
   const ThemeIcon = $derived(
-    app.theme === "dark" ? Moon : app.theme === "book" ? BookOpenText : SunMedium,
+    app.themeKind === "dark" ? Moon : app.themeId === "book" ? BookOpenText : SunMedium,
   );
 
   let editingTitle = $state(false);
