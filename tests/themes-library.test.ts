@@ -8,6 +8,7 @@ import {
   loadThemeFiles,
   slugFor,
   uniqueName,
+  withCustom,
 } from "../src/lib/themes/library";
 import { parseTheme } from "../src/lib/themes/model";
 
@@ -124,5 +125,26 @@ describe("loadThemeFiles", () => {
     expect(r.warnings).toHaveLength(3);
     expect(r.custom?.name).toBe("Custom");
     expect(r.customBasedOn).toBe("a");
+  });
+});
+
+describe("withCustom", () => {
+  const mine = { ...LIGHT, id: "mine", name: "Mine" };
+  const custom = (page: string) => ({ ...LIGHT, id: "custom", name: "Custom", colors: { ...LIGHT.colors, page } });
+
+  it("adds Custom last when absent", () => {
+    const list = [...BUILT_IN, mine];
+    const out = withCustom(list, custom("#111111"));
+    expect(out.map((t) => t.id)).toEqual([...BUILT_IN.map((t) => t.id), "mine", "custom"]);
+    expect(list).toHaveLength(BUILT_IN.length + 1);
+  });
+  it("replaces Custom in place, leaving the other entries untouched", () => {
+    const list = [...BUILT_IN, mine, custom("#111111")];
+    const next = custom("#222222");
+    const out = withCustom(list, next);
+    expect(out.map((t) => t.id)).toEqual(list.map((t) => t.id));
+    expect(out[out.length - 1]).toBe(next);
+    expect(out.slice(0, -1).every((t, i) => t === list[i])).toBe(true);
+    expect(list[list.length - 1].colors.page).toBe("#111111");
   });
 });

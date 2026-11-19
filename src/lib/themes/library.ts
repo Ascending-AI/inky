@@ -107,6 +107,15 @@ export function orderThemes(themes: readonly Theme[]): Theme[] {
   return [...BUILT_IN, ...READY_MADE, ...yours, ...custom];
 }
 
+/** The theme list with Custom replaced in place, or added (last) when absent. */
+export function withCustom(themes: readonly Theme[], custom: Theme): Theme[] {
+  const i = themes.findIndex((t) => t.id === "custom");
+  if (i === -1) return orderThemes([...themes, custom]);
+  const out = themes.slice();
+  out[i] = custom;
+  return out;
+}
+
 const SECTIONS: [ThemeGroup, string][] = [
   ["builtin", "Built-in"],
   ["yours", "Your themes"],

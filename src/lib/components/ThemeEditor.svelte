@@ -94,7 +94,8 @@
     current.id === "custom" ? app.themes.find((t) => t.id === app.customBasedOn)?.name : undefined,
   );
 
-  // Picker input arrives many times a second; the app follows once per frame.
+  // Picker input arrives many times a second; the app repaints once per frame
+  // (`applyEdit` is the cheap live path; the rest settles when edits pause).
   function change(next: EditState) {
     edit = next;
     changed = true;
@@ -142,12 +143,17 @@
   let renameOpen = $state(false);
   let deleteOpen = $state(false);
 
-  /** Apply a change still waiting for its frame, so saving sees it. */
+  /**
+   * Apply a change still waiting for its frame, then have the app settle the
+   * live edits now (menus, re-renders, custom.json): before saving and on close.
+   */
   function flush() {
-    if (!frame) return;
-    cancelAnimationFrame(frame);
-    frame = 0;
-    if (edit && changed) app.applyEdit(edit);
+    if (frame) {
+      cancelAnimationFrame(frame);
+      frame = 0;
+      if (edit && changed) app.applyEdit(edit);
+    }
+    app.flushCustom();
   }
 </script>
 

@@ -21,6 +21,7 @@ import {
   slugFor,
   themeGroup,
   uniqueName,
+  withCustom,
   type EditState,
 } from "./themes/library";
 import { WELCOME_DOC, MERMAID_TEMPLATE } from "./templates";
@@ -551,24 +552,41 @@ class AppState {
     }
   }
 
-  /** Make an edit state the active Custom theme and save it (debounced). */
+  /**
+   * Show an edit state as the active Custom theme. Runs on every picker frame,
+   * so it only paints: the colours go on <html> and Custom into the list. The
+   * menus, stored id, theme-keyed re-renders and custom.json follow once the
+   * edits pause (`#settleCustom`).
+   */
   applyEdit(s: EditState) {
     const theme = editedTheme(s);
     if (s.start.id !== "custom") this.customBasedOn = s.start.id;
-    this.#setThemes([...this.themes.filter((t) => t.id !== "custom"), theme]);
-    this.setTheme("custom");
+    this.themes = withCustom(this.themes, theme);
+    this.themeId = "custom";
+    applyThemeTo(document.documentElement, theme);
     if (this.#customTimer) clearTimeout(this.#customTimer);
-    this.#customTimer = setTimeout(() => this.#writeCustom(), 300);
+    this.#customTimer = setTimeout(() => this.#settleCustom(), 300);
   }
 
-  /** Write a pending Custom save now (before the app quits). */
+  /** Settle pending Custom edits now (editor closing, app quitting). */
   flushCustom() {
     if (!this.#customTimer) return;
     clearTimeout(this.#customTimer);
+    this.#settleCustom();
+  }
+
+  /** Catch up after live edits: stored id, theme-keyed re-renders, menus, custom.json. */
+  #settleCustom() {
+    this.#customTimer = null;
+    this.applyTheme();
+    this.syncMenuChecks();
+    this.pushThemeMenu();
     this.#writeCustom();
   }
 
   #writeCustom() {
+    // Writing now makes a pending settle's write redundant.
+    if (this.#customTimer) clearTimeout(this.#customTimer);
     this.#customTimer = null;
     const custom = this.themes.find((t) => t.id === "custom");
     if (!custom) return;
