@@ -192,3 +192,36 @@ export function loadThemeFiles(files: readonly { id: string; json: string }[]): 
   }
   return out;
 }
+
+/** How many recently used ready-made themes the short theme menu keeps. */
+export const RECENT_MAX = 4;
+
+/**
+ * The recent list after using `id`: ready-made themes only, newest first,
+ * no duplicates, at most RECENT_MAX. Other ids leave the list unchanged.
+ */
+export function pushRecent(recent: readonly string[], id: string): string[] {
+  if (themeGroup(id) !== "readymade") return recent.slice();
+  return [id, ...recent.filter((r) => r !== id)].slice(0, RECENT_MAX);
+}
+
+/**
+ * The short theme list for the toolbar menu: built-in, your themes, Custom,
+ * then the recently used ready-made themes (the active one always among
+ * them). Everything else lives in the Themes panel.
+ */
+export function shortThemeSections(
+  themes: readonly Theme[],
+  recent: readonly string[],
+  activeId: string,
+): { label: string; items: Theme[] }[] {
+  const ids = themeGroup(activeId) === "readymade" ? pushRecent(recent, activeId) : recent;
+  const byId = new Map(themes.map((t) => [t.id, t]));
+  const recents = ids
+    .filter((id) => themeGroup(id) === "readymade")
+    .map((id) => byId.get(id))
+    .filter((t): t is Theme => t !== undefined);
+  const out = themeSections(themes).filter((s) => s.label !== "Ready-made");
+  if (recents.length > 0) out.push({ label: "Recent", items: recents });
+  return out;
+}

@@ -28,7 +28,7 @@
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
   import Check from "@lucide/svelte/icons/check";
-  import { themeSections } from "$lib/themes/library";
+  import { shortThemeSections } from "$lib/themes/library";
   import SunMedium from "@lucide/svelte/icons/sun-medium";
   import Moon from "@lucide/svelte/icons/moon";
   import BookOpenText from "@lucide/svelte/icons/book-open-text";
@@ -639,8 +639,8 @@
           </Button>
         {/snippet}
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="end" class="max-h-[60vh] overflow-y-auto">
-        {#each themeSections(app.themes) as sec, i (sec.label)}
+      <DropdownMenu.Content align="end" class="max-h-[70vh] w-56 overflow-y-auto">
+        {#each shortThemeSections(app.themes, app.recentThemeIds, app.themeId) as sec, i (sec.label)}
           {#if i > 0}<DropdownMenu.Separator />{/if}
           <DropdownMenu.Label class="text-xs text-muted-foreground">{sec.label}</DropdownMenu.Label>
           {#each sec.items as t (t.id)}
@@ -650,12 +650,15 @@
                   <span class="size-2.5 rounded-full border border-black/15" style="background-color:{c}"></span>
                 {/each}
               </span>
-              <span class="flex-1">{t.name}</span>
+              <span class="min-w-0 flex-1 truncate whitespace-nowrap">{t.name}</span>
               {#if t.id === app.themeId}<Check class="size-4" />{/if}
             </DropdownMenu.Item>
           {/each}
         {/each}
         <DropdownMenu.Separator />
+        <DropdownMenu.Item onclick={() => app.themesPanelVisible || app.toggleThemesPanel()}>
+          All Themes…
+        </DropdownMenu.Item>
         <DropdownMenu.Item onclick={() => app.openThemeEditor()}>Edit Themes…</DropdownMenu.Item>
       </DropdownMenu.Content>
     </DropdownMenu.Root>

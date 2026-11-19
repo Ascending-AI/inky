@@ -20,6 +20,7 @@ import {
   orderThemes,
   slugFor,
   themeGroup,
+  pushRecent,
   uniqueName,
   withCustom,
   type EditState,
@@ -166,6 +167,10 @@ class AppState {
   /** Bumped on every apply; things that render colours (diagrams) redo on it. */
   themeVersion = $state(0);
   themeEditorVisible = $state(false);
+  /** The Themes panel (every theme, as preview cards) on the right. */
+  themesPanelVisible = $state(false);
+  /** Recently used ready-made themes, newest first (see pushRecent). */
+  recentThemeIds = $state<string[]>([]);
   /** The theme the saved Custom started from (its `basedOn`). */
   customBasedOn = $state<string | null>(null);
   #customTimer: ReturnType<typeof setTimeout> | null = null;
@@ -333,6 +338,12 @@ class AppState {
   async init() {
     const storedTheme = localStorage.getItem("inky.theme");
     if (storedTheme) this.themeId = storedTheme;
+    try {
+      const r = JSON.parse(localStorage.getItem("inky.recentThemes") ?? "[]");
+      if (Array.isArray(r)) this.recentThemeIds = r.filter((x) => typeof x === "string");
+    } catch {
+      // a damaged list just starts empty
+    }
     const storedView = localStorage.getItem("inky.viewMode") as ViewMode | null;
     if (storedView) this.viewMode = storedView;
     const storedScale = parseFloat(localStorage.getItem("inky.fontScale") ?? "");
@@ -514,6 +525,11 @@ class AppState {
 
   setTheme(id: string) {
     this.themeId = id;
+    const recent = pushRecent(this.recentThemeIds, id);
+    if (recent.join() !== this.recentThemeIds.join()) {
+      this.recentThemeIds = recent;
+      localStorage.setItem("inky.recentThemes", JSON.stringify(recent));
+    }
     this.applyTheme();
     this.syncMenuChecks();
     this.pushThemeMenu();
@@ -820,6 +836,7 @@ class AppState {
     if (this.tocVisible) {
       this.commentsVisible = false;
       this.highlightsVisible = false;
+      this.themesPanelVisible = false;
     }
     localStorage.setItem("inky.tocVisible", String(this.tocVisible));
   }
@@ -830,6 +847,7 @@ class AppState {
     if (this.commentsVisible) {
       this.tocVisible = false;
       this.highlightsVisible = false;
+      this.themesPanelVisible = false;
     } else this.commentDraft = null;
   }
 
@@ -871,6 +889,7 @@ class AppState {
     this.commentsVisible = true;
     this.tocVisible = false;
     this.highlightsVisible = false;
+    this.themesPanelVisible = false;
     this.activeThreadId = null;
   }
 
@@ -929,6 +948,7 @@ class AppState {
     this.commentsVisible = true;
     this.tocVisible = false;
     this.highlightsVisible = false;
+    this.themesPanelVisible = false;
     const thread = this.commentThreads.find((t) => t.id === threadId);
     if (thread?.resolved && this.commentFilter === "open") this.commentFilter = "all";
   }
@@ -969,6 +989,16 @@ class AppState {
     if (this.highlightsVisible) {
       this.tocVisible = false;
       this.commentsVisible = false;
+      this.themesPanelVisible = false;
+    }
+  }
+
+  toggleThemesPanel() {
+    this.themesPanelVisible = !this.themesPanelVisible;
+    if (this.themesPanelVisible) {
+      this.tocVisible = false;
+      this.commentsVisible = false;
+      this.highlightsVisible = false;
     }
   }
 
@@ -1092,6 +1122,7 @@ class AppState {
       this.sidebarVisible = false;
       this.tocVisible = false;
       this.highlightsVisible = false;
+      this.themesPanelVisible = false;
     } else {
       this.focusMode = false;
       if (this.#preFocus) {
@@ -1353,6 +1384,7 @@ class AppState {
               this.commentsVisible = true;
               this.tocVisible = false;
               this.highlightsVisible = false;
+              this.themesPanelVisible = false;
             },
           },
         });
