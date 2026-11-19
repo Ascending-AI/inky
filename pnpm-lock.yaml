@@ -74,9 +74,6 @@ importers:
       marked-footnote:
         specifier: ^1.4.0
         version: 1.4.0(marked@18.0.11)
-      marked-highlight:
-        specifier: ^2.2.4
-        version: 2.2.4(marked@18.0.11)
       marked-katex-extension:
         specifier: ^5.1.12
         version: 5.1.12(katex@0.18.5)(marked@18.0.11)
@@ -1570,11 +1567,6 @@ packages:
     resolution: {integrity: sha512-fZTxAhI1TcLEs5UOjCfYfTHpyKGaWQevbxaGTEA68B51l7i87SctPFtHETYqPkEN0ka5opvy4Dy1l/yXVC+hmg==}
     peerDependencies:
       marked: '>=7.0.0'
-
-  marked-highlight@2.2.4:
-    resolution: {integrity: sha512-PZxisNMJDduSjc0q6uvjsnqqHCXc9s0eyzxDO9sB1eNGJnd/H1/Fu+z6g/liC1dfJdFW4SftMwMlLvsBhUPrqQ==}
-    peerDependencies:
-      marked: '>=4 <19'
 
   marked-katex-extension@5.1.12:
     resolution: {integrity: sha512-DgfH0CFrOuVwVEXNJ+rTtYOtZZECpHhA0bu7xBiACAJI4geeaCZfDq+hiJ1yJx780fDh2HWHlr+NySxuc2DD1w==}
@@ -3485,10 +3477,6 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.6.0
 
   marked-footnote@1.4.0(marked@18.0.11):
-    dependencies:
-      marked: 18.0.11
-
-  marked-highlight@2.2.4(marked@18.0.11):
     dependencies:
       marked: 18.0.11
 

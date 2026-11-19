@@ -35,6 +35,9 @@
   import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
   import { inkyHighlightStyle } from "$lib/cmtheme";
   import { toast } from "svelte-sonner";
+  import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+  import { codeBlockText } from "$lib/codehighlight";
+  import Copy from "@lucide/svelte/icons/copy";
   import Bold from "@lucide/svelte/icons/bold";
   import Italic from "@lucide/svelte/icons/italic";
   import Strikethrough from "@lucide/svelte/icons/strikethrough";
@@ -237,6 +240,8 @@
   // Mermaid needs a second pass over the real DOM, and a full redo on theme change.
   $effect(() => {
     html;
+    // A re-render replaces the code blocks the Copy button pointed at.
+    codeCopy = null;
     const theme = app.theme;
     app.commentThreads;
     if (!container) return;
@@ -1086,6 +1091,40 @@
 
   // --- hover preview of comment threads ------------------------------------
   let hoverCard = $state<{ id: string; x: number; y: number } | null>(null);
+
+  // --- Copy button on code blocks -------------------------------------------
+  // One floating button over the hovered block, so the document's own text
+  // (search, highlights, comments) never contains it.
+  let codeCopy = $state<{ pre: HTMLElement; x: number; y: number } | null>(null);
+
+  function onCodeHover(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (target.closest?.("[data-code-copy]")) return;
+    const pre = target.closest?.<HTMLElement>("pre.code-block");
+    if (!pre || !scroller || !container?.contains(pre)) {
+      codeCopy = null;
+      return;
+    }
+    if (codeCopy?.pre === pre) return;
+    const rect = pre.getBoundingClientRect();
+    const srect = scroller.getBoundingClientRect();
+    codeCopy = {
+      pre,
+      // Right end of the block's 30px title bar.
+      x: rect.right - srect.left - 8,
+      y: rect.top - srect.top + scroller.scrollTop + 5,
+    };
+  }
+
+  async function copyCode() {
+    if (!codeCopy) return;
+    try {
+      await writeText(codeBlockText(codeCopy.pre));
+      toast.success(codeCopy.pre.classList.contains("code-shell") ? "Commands copied" : "Code copied");
+    } catch (e) {
+      toast.error(`Could not copy: ${e}`);
+    }
+  }
   const hoverThread = $derived.by(() => {
     const hc = hoverCard;
     return hc ? (app.commentThreads.find((t) => t.id === hc.id) ?? null) : null;
@@ -1222,6 +1261,7 @@
 
   function onHover(e: MouseEvent) {
     onLinkHover(e);
+    onCodeHover(e);
     const mark = (e.target as HTMLElement).closest?.<HTMLElement>("mark.comment-hl");
     if (mark?.dataset.threadId && scroller) {
       const rect = mark.getBoundingClientRect();
@@ -1498,6 +1538,7 @@
   onmouseover={onHover}
   onmouseleave={() => {
     hoverCard = null;
+    codeCopy = null;
     if (linkAnchor) hideLinkCard();
   }}
 >
@@ -1506,6 +1547,22 @@
     <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized via DOMPurify -->
     {@html html}
   </div>
+  {#if codeCopy}
+    <button
+      data-code-copy
+      class="no-print absolute z-10 flex h-[22px] -translate-x-full items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2 text-[11px] text-[#9aa0ab] hover:bg-white/10 hover:text-white"
+      style="left: {codeCopy.x}px; top: {codeCopy.y}px"
+      onmousedown={(e) => e.preventDefault()}
+      onclick={(e) => {
+        e.stopPropagation();
+        copyCode();
+      }}
+      ondblclick={(e) => e.stopPropagation()}
+      title="Copy to clipboard"
+    >
+      <Copy class="size-3" /> Copy
+    </button>
+  {/if}
   {#if selAction}
     <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
     <div

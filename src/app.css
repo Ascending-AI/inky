@@ -365,19 +365,75 @@
   border-radius: 5px;
   padding: 0.15em 0.4em;
 }
+/* Code blocks are terminal windows in every theme: a dark window with a
+   title bar (three dots and the language), its own palette for tokens. */
 .prose-doc pre {
-  background: var(--prose-code-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1em 1.2em;
-  overflow-x: auto;
-  margin: 1.2em 0;
-  line-height: 1.55;
+  --code-bg: #1e1f24;
+  --code-bar: #2a2c33;
+  --code-border: #34363e;
+  --code-fg: #d7dae0;
+  --code-muted: #8f96a3;
+  --hl-comment: #7f848e;
+  --hl-keyword: #c678dd;
+  --hl-string: #98c379;
+  --hl-title: #61afef;
+  --hl-number: #d19a66;
+  --hl-attr: #e06c75;
+  --hl-type: #e5c07b;
+  --hl-builtin: #56b6c2;
+  --hl-prompt: #98c379;
+  position: relative;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  border: 1px solid var(--code-border);
+  border-radius: 10px;
+  padding: 0;
+  overflow: hidden;
+  margin: 1.3em 0;
+  line-height: 1.6;
+  box-shadow: 0 6px 20px -10px rgb(0 0 0 / 45%);
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+/* The title bar is a pseudo-element, so it is never part of the block's
+   text: search, highlights and copying ignore it. */
+.prose-doc pre::before {
+  content: attr(data-lang);
+  display: block;
+  height: 30px;
+  line-height: 30px;
+  padding: 0 1rem 0 68px;
+  background:
+    radial-gradient(circle at 16px 50%, #ff5f57 5.5px, transparent 6px),
+    radial-gradient(circle at 34px 50%, #febc2e 5.5px, transparent 6px),
+    radial-gradient(circle at 52px 50%, #28c840 5.5px, transparent 6px),
+    var(--code-bar);
+  border-bottom: 1px solid var(--code-border);
+  color: var(--code-muted);
+  font: 500 0.72rem/30px system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.02em;
 }
 .prose-doc pre code {
+  display: block;
   background: none;
-  padding: 0;
-  font-size: 0.85em;
+  color: inherit;
+  padding: 0.9em 1.15em 1em;
+  overflow-x: auto;
+  font-size: 0.84em;
+  tab-size: 2;
+}
+/* Terminal sessions: prompt and command stand out, output is quieter. */
+.prose-doc pre.code-shell code {
+  color: var(--code-muted);
+}
+.prose-doc pre.code-shell .hljs-meta.prompt_ {
+  color: var(--hl-prompt);
+  font-weight: 600;
+  user-select: none;
+}
+.prose-doc pre.code-shell .language-bash {
+  color: var(--code-fg);
+  font-weight: 500;
 }
 .prose-doc table {
   border-collapse: collapse;
@@ -459,9 +515,26 @@
 }
 .prose-doc .hljs-number,
 .prose-doc .hljs-literal,
-.prose-doc .hljs-built_in,
 .prose-doc .hljs-symbol {
   color: var(--hl-number);
+}
+.prose-doc .hljs-built_in {
+  color: var(--hl-builtin);
+}
+.prose-doc .hljs-type,
+.prose-doc .hljs-title.class_,
+.prose-doc .hljs-selector-class,
+.prose-doc .hljs-selector-id {
+  color: var(--hl-type);
+}
+.prose-doc .hljs-property,
+.prose-doc .hljs-selector-attr,
+.prose-doc .hljs-tag {
+  color: var(--hl-attr);
+}
+.prose-doc .hljs-punctuation,
+.prose-doc .hljs-operator {
+  color: var(--code-muted);
 }
 .prose-doc .hljs-attr,
 .prose-doc .hljs-attribute,
@@ -930,6 +1003,11 @@
     --hl-title: #6f42c1;
     --hl-number: #005cc5;
     --hl-attr: #22863a;
+  }
+  /* Long lines wrap on paper instead of being cut off. */
+  .prose-doc pre code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
   .prose-doc pre,
   .prose-doc blockquote,

@@ -123,7 +123,12 @@ Inky checks for updates on launch and from **Inky → Check for Updates…**.
   standalone diagrams.
 - **Math** with KaTeX: `$…$` inline, `$$…$$` display. Dollar amounts stay
   plain text.
-- GFM tables, footnotes, task lists and syntax-highlighted code.
+- GFM tables, footnotes and task lists.
+- **Code blocks** look like terminal windows in every theme, with a title bar
+  showing the language and a Copy button. Inky guesses the language when a block has none. Terminal
+  sessions (`$ …`) show the prompt and command apart from the output, and Copy
+  takes just the commands. Compact JSON is laid out for reading; the file stays
+  as written.
 - **PDF export** (⌘E) uses clean print typography whatever your theme.
   **Print** is ⌘P. You can also copy the Markdown source or the rendered HTML.
 

@@ -1,26 +1,18 @@
 import { Marked } from "marked";
-import { markedHighlight } from "marked-highlight";
 import markedKatex from "marked-katex-extension";
 import markedFootnote from "marked-footnote";
-import hljs from "highlight.js/lib/common";
 import DOMPurify from "dompurify";
+import { highlightCode } from "./codehighlight";
 import type { ThemeName } from "./types";
 
-const marked = new Marked(
-  markedHighlight({
-    emptyLangClass: "hljs",
-    langPrefix: "hljs language-",
-    highlight(code, lang) {
-      if (lang === "mermaid") return code;
-      const language = hljs.getLanguage(lang) ? lang : "plaintext";
-      return hljs.highlight(code, { language }).value;
-    },
-  }),
-  {
-    gfm: true,
-    breaks: false,
-  },
-);
+const marked = new Marked({
+  gfm: true,
+  breaks: false,
+});
+
+function escapeAttr(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
 
 marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
 
@@ -197,10 +189,14 @@ marked.use({
       return `<h${depth} id="${id}">${this.parser.parseInline(tokens)}</h${depth}>\n`;
     },
     code({ text, lang }) {
-      if (lang === "mermaid") {
+      const name = (lang ?? "").trim().split(/\s+/)[0] ?? "";
+      if (name === "mermaid") {
         return `<div class="mermaid-block" data-mermaid="${encodeURIComponent(text)}"></div>\n`;
       }
-      return false;
+      const code = highlightCode(text, name);
+      const label = code.label ? ` data-lang="${escapeAttr(code.label)}"` : "";
+      const kind = code.shell ? " code-shell" : "";
+      return `<pre class="code-block${kind}"${label}><code class="hljs language-${code.language}">${code.html}</code></pre>\n`;
     },
     checkbox({ checked }) {
       // Enabled (marked emits `disabled`) so reading mode can toggle tasks.

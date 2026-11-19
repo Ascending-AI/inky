@@ -1,7 +1,7 @@
 {
   "name": "inky",
   "version": "0.1.0",
-  "description": "Inky \u2014 a pleasant markdown reader and editor",
+  "description": "Inky — a pleasant markdown reader and editor",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -37,7 +37,6 @@
     "katex": "^0.18.5",
     "marked": "^18.0.11",
     "marked-footnote": "^1.4.0",
-    "marked-highlight": "^2.2.4",
     "marked-katex-extension": "^5.1.12",
     "mermaid": "^11.17.2",
     "tailwind-merge": "^3.6.0",
