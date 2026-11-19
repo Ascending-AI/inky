@@ -65,15 +65,17 @@
       focus_mode: () => app.toggleFocusMode(),
       quick_open: () => (app.quickOpenVisible = true),
       check_updates: () => app.checkForUpdates(true),
-      theme_light: () => app.setTheme("light"),
-      theme_dark: () => app.setTheme("dark"),
-      theme_book: () => app.setTheme("book"),
+      edit_themes: () => app.openThemeEditor(),
       font_plus: () => app.adjustFontScale(1),
       font_minus: () => app.adjustFontScale(-1),
       quit_app: () => app.quitApp(),
     };
     if (id.startsWith("width_")) {
       app.setReadingWidth(id.slice(6) as ReadingWidth);
+      return;
+    }
+    if (id.startsWith("theme:")) {
+      app.setTheme(id.slice(6));
       return;
     }
     actions[id]?.();

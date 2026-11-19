@@ -9,6 +9,7 @@ pub mod mcp;
 pub mod opens;
 pub mod places;
 pub mod recents;
+pub mod themes;
 
 use library::{Config, Library, Node, SearchHit, VersionInfo};
 
@@ -787,6 +788,140 @@ async fn install_cli() -> Result<String, String> {
     Err(if err.is_empty() { "Could not install the command".into() } else { err })
 }
 
+// --- themes ------------------------------------------------------------------
+
+fn themes_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().app_config_dir().map_err(|e| e.to_string())?.join("themes"))
+}
+
+#[tauri::command]
+fn list_themes(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    Ok(themes::list(&themes_dir(&app)?))
+}
+
+#[tauri::command]
+fn write_theme(app: tauri::AppHandle, id: String, json: String) -> Result<(), String> {
+    themes::write(&themes_dir(&app)?, &id, &json)
+}
+
+#[tauri::command]
+fn delete_theme(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    themes::delete(&themes_dir(&app)?, &id)
+}
+
+/// Pick a theme file and return its text. `async`, so the blocking dialog
+/// runs off the main thread.
+#[tauri::command]
+async fn import_theme_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let Some(path) = app
+        .dialog()
+        .file()
+        .add_filter("Theme", &["json"])
+        .blocking_pick_file()
+        .and_then(|p| p.into_path().ok())
+    else {
+        return Ok(None);
+    };
+    fs::read_to_string(path).map(Some).map_err(|e| e.to_string())
+}
+
+/// Save a theme file where the reader chooses; `false` when cancelled.
+#[tauri::command]
+async fn export_theme_file(app: tauri::AppHandle, name: String, json: String) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let Some(path) = app
+        .dialog()
+        .file()
+        .add_filter("Theme", &["json"])
+        .set_file_name(format!("{name}.json"))
+        .blocking_save_file()
+        .and_then(|p| p.into_path().ok())
+    else {
+        return Ok(false);
+    };
+    fs::write(path, json).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+#[derive(serde::Deserialize)]
+struct ThemeMenuEntry {
+    id: String,
+    name: String,
+    /// "builtin" | "yours" | "custom" | "readymade"
+    group: String,
+    checked: bool,
+}
+
+/// Fill the Theme submenu: built-ins, yours + Custom, a Ready-made submenu,
+/// then Edit Themes…. Separators only appear between non-empty groups.
+fn fill_theme_menu(
+    app: &tauri::AppHandle,
+    sub: &tauri::menu::Submenu<tauri::Wry>,
+    entries: &[ThemeMenuEntry],
+) -> tauri::Result<()> {
+    use tauri::menu::{CheckMenuItemBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+    for item in sub.items()? {
+        sub.remove(&item)?;
+    }
+    let check = |e: &ThemeMenuEntry| {
+        CheckMenuItemBuilder::with_id(format!("theme:{}", e.id), &e.name).checked(e.checked).build(app)
+    };
+    let in_groups = |groups: &[&str]| -> Vec<&ThemeMenuEntry> {
+        entries.iter().filter(|e| groups.contains(&e.group.as_str())).collect()
+    };
+    let builtin = in_groups(&["builtin"]);
+    let yours = in_groups(&["yours", "custom"]);
+    let ready = in_groups(&["readymade"]);
+
+    for e in &builtin {
+        sub.append(&check(e)?)?;
+    }
+    if !yours.is_empty() {
+        sub.append(&PredefinedMenuItem::separator(app)?)?;
+        for e in &yours {
+            sub.append(&check(e)?)?;
+        }
+    }
+    if !ready.is_empty() {
+        sub.append(&PredefinedMenuItem::separator(app)?)?;
+        let mut rm = SubmenuBuilder::new(app, "Ready-made");
+        for e in &ready {
+            rm = rm.item(&check(e)?);
+        }
+        sub.append(&rm.build()?)?;
+    }
+    sub.append(&PredefinedMenuItem::separator(app)?)?;
+    sub.append(&MenuItemBuilder::with_id("edit_themes", "Edit Themes…").build(app)?)?;
+    Ok(())
+}
+
+/// Replace the Theme submenu's items in place (main thread), leaving the
+/// rest of the menu bar and its state alone.
+#[tauri::command]
+fn set_theme_menu(app: tauri::AppHandle, entries: Vec<ThemeMenuEntry>) {
+    use tauri::menu::MenuItemKind;
+    let _ = app.run_on_main_thread({
+        let app = app.clone();
+        move || {
+            let Some(menu) = app.menu() else { return };
+            let Ok(items) = menu.items() else { return };
+            for item in items {
+                if let MenuItemKind::Submenu(view) = item {
+                    let Ok(children) = view.items() else { continue };
+                    for child in children {
+                        if let MenuItemKind::Submenu(s) = child {
+                            if s.id().0 == "theme_menu" {
+                                let _ = fill_theme_menu(&app, &s, &entries);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
 /// Recursively find a check menu item by id and set its checked state.
 #[tauri::command]
 fn set_menu_checked(app: tauri::AppHandle, id: String, checked: bool) {
@@ -925,11 +1060,14 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
         )
         .build()?;
 
-    let theme_sub = SubmenuBuilder::new(handle, "Theme")
-        .item(&CheckMenuItemBuilder::with_id("theme_light", "Light").build(handle)?)
-        .item(&CheckMenuItemBuilder::with_id("theme_dark", "Dark").build(handle)?)
-        .item(&CheckMenuItemBuilder::with_id("theme_book", "Book").build(handle)?)
-        .build()?;
+    let theme_sub = SubmenuBuilder::with_id(handle, "theme_menu", "Theme").build()?;
+    let initial = [("light", "Light"), ("dark", "Dark"), ("book", "Book")].map(|(id, name)| ThemeMenuEntry {
+        id: id.into(),
+        name: name.into(),
+        group: "builtin".into(),
+        checked: false,
+    });
+    fill_theme_menu(handle, &theme_sub, &initial)?;
 
     let width_sub = SubmenuBuilder::new(handle, "Text Width")
         .item(&CheckMenuItemBuilder::with_id("width_default", "Default").build(handle)?)
@@ -1111,6 +1249,12 @@ pub fn run() {
             image_stamps,
             print_document,
             set_menu_checked,
+            set_theme_menu,
+            list_themes,
+            write_theme,
+            delete_theme,
+            import_theme_file,
+            export_theme_file,
             save_image,
             read_comments,
             write_comments,

@@ -153,6 +153,7 @@ class AppState {
   themeKind = $derived(this.activeTheme.kind);
   /** Bumped on every apply; things that render colours (diagrams) redo on it. */
   themeVersion = $state(0);
+  themeEditorVisible = $state(false);
   viewMode = $state<ViewMode>("split");
   fontScale = $state(1);
   readingWidth = $state<ReadingWidth>("default");
@@ -337,6 +338,7 @@ class AppState {
     if (isColor(storedColor)) this.highlightColor = storedColor;
     this.highlightStore = parseStore(await invoke<string>("read_highlights").catch(() => ""));
     this.applyTheme();
+    this.pushThemeMenu();
     this.applyReadingPrefs();
 
     this.libraryRoot = await invoke<string>("library_root");
@@ -479,9 +481,6 @@ class AppState {
     const checks: [string, boolean][] = [
       ["sync_scroll", this.syncScroll],
       ["focus_mode", this.focusMode],
-      ["theme_light", this.themeId === "light"],
-      ["theme_dark", this.themeId === "dark"],
-      ["theme_book", this.themeId === "book"],
       ...Object.keys(READING_WIDTHS).map(
         (k): [string, boolean] => [`width_${k}`, this.readingWidth === k],
       ),
@@ -501,6 +500,30 @@ class AppState {
     this.themeId = id;
     this.applyTheme();
     this.syncMenuChecks();
+    this.pushThemeMenu();
+  }
+
+  /** Rebuild the native Theme submenu from the theme list. */
+  pushThemeMenu() {
+    const group = (id: string) =>
+      id === "custom"
+        ? "custom"
+        : id.startsWith("rm-")
+          ? "readymade"
+          : BUILT_IN.some((t) => t.id === id)
+            ? "builtin"
+            : "yours";
+    const entries = this.themes.map((t) => ({
+      id: t.id,
+      name: t.name,
+      group: group(t.id),
+      checked: t.id === this.themeId,
+    }));
+    invoke("set_theme_menu", { entries }).catch(() => {});
+  }
+
+  openThemeEditor() {
+    this.themeEditorVisible = true;
   }
 
   setViewMode(mode: ViewMode) {
