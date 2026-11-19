@@ -6,11 +6,12 @@ import {
   customFile,
   editedTheme,
   loadThemeFiles,
+  replaceTarget,
   slugFor,
   uniqueName,
   withCustom,
 } from "../src/lib/themes/library";
-import { parseTheme } from "../src/lib/themes/model";
+import { parseTheme, type Theme } from "../src/lib/themes/model";
 import { READY_MADE } from "../src/lib/themes/readymade";
 
 const ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -147,5 +148,61 @@ describe("withCustom", () => {
     expect(out[out.length - 1]).toBe(next);
     expect(out.slice(0, -1).every((t, i) => t === list[i])).toBe(true);
     expect(list[list.length - 1].colors.page).toBe("#111111");
+  });
+});
+
+describe("beginEdit pins", () => {
+  const mine = (id: string, colors: Partial<Theme["colors"]>): Theme => ({
+    id,
+    name: id,
+    kind: "light",
+    colors: { ...LIGHT.colors, hover: undefined, ...colors } as Theme["colors"],
+  });
+  const strip = (t: Theme): Theme => {
+    const c = { ...t.colors };
+    for (const k of Object.keys(c) as (keyof typeof c)[]) if (c[k] === undefined) delete c[k];
+    return { ...t, colors: c };
+  };
+
+  it("seeds Custom's explicit exact colours as pins, so they survive a main-colour change", () => {
+    const custom = strip({ ...mine("custom", { quoteBar: "#123456", tabStrip: undefined }), name: "Custom" });
+    const s = beginEdit({
+      ...custom,
+      colors: { page: "#fff", text: "#000", accent: "#00f", sidebar: "#eee", border: "#ddd", quoteBar: "#123456" },
+    });
+    expect(s.pinned).toEqual({ quoteBar: "#123456" });
+    s.mains = { ...s.mains, page: "#fafafa" };
+    s.mainsTouched = true;
+    expect(editedTheme(s).colors.quoteBar).toBe("#123456");
+  });
+  it("does the same for your own themes", () => {
+    const t: Theme = {
+      id: "ocean",
+      name: "Ocean",
+      kind: "light",
+      colors: { page: "#fff", text: "#000", accent: "#00f", sidebar: "#eee", border: "#ddd", hover: "#abcdef" },
+    };
+    expect(beginEdit(t).pinned).toEqual({ hover: "#abcdef" });
+  });
+  it("leaves built-in and ready-made starts unpinned", () => {
+    expect(beginEdit(LIGHT).pinned).toEqual({});
+    expect(beginEdit(READY_MADE[0]).pinned).toEqual({});
+  });
+});
+
+describe("replaceTarget", () => {
+  const themes: Theme[] = [
+    ...BUILT_IN,
+    ...READY_MADE,
+    { id: "ocean", name: "Ocean", kind: "light", colors: LIGHT.colors },
+  ];
+  it("matches one of your themes ignoring case and spaces", () => {
+    expect(replaceTarget(themes, "  ocean ")?.id).toBe("ocean");
+  });
+  it("never matches built-in, ready-made or Custom names", () => {
+    expect(replaceTarget(themes, "Dark")).toBeNull();
+    expect(replaceTarget(themes, READY_MADE[0].name)).toBeNull();
+    expect(replaceTarget(themes, "Custom")).toBeNull();
+    expect(replaceTarget(themes, "Nothing")).toBeNull();
   });
 });

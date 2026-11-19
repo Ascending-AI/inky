@@ -12,9 +12,9 @@
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import { beginEdit, editedTheme, themeGroup, themeSections, type EditState } from "$lib/themes/library";
-  import { deriveExact, EXACT_KEYS, MAIN_KEYS, resolveTheme, type ExactKey, type MainKey, type Theme } from "$lib/themes/model";
-  import { resolveColorWith } from "$lib/themes/colors";
+  import { beginEdit, editedTheme, replaceTarget, themeGroup, themeSections, type EditState } from "$lib/themes/library";
+  import { deriveExact, EXACT_KEYS, MAIN_KEYS, type ExactKey, type MainKey, type Theme } from "$lib/themes/model";
+  import { resolveColor } from "$lib/themes/colors";
   import { contrastIssues, type ContrastKey } from "$lib/themes/contrast";
 
   const MAIN_LABELS: Record<MainKey, string> = {
@@ -71,9 +71,8 @@
 
   /** The theme the editor shows: the start theme until the first change, then Custom. */
   const current = $derived(edit ? (changed ? editedTheme(edit) : edit.start) : app.activeTheme);
-  const props = $derived(resolveTheme(current));
   const derivedExact = $derived(deriveExact(current));
-  const resolve = (css: string) => resolveColorWith(css, props);
+  const resolve = resolveColor;
   const warnings = $derived(
     Object.fromEntries(
       contrastIssues(current, resolve).map((i) => [
@@ -142,6 +141,8 @@
   let saveAsOpen = $state(false);
   let renameOpen = $state(false);
   let deleteOpen = $state(false);
+  /** The theme of yours a Save as… name matched; asks before replacing it. */
+  let replaceTargetTheme = $state<Theme | null>(null);
 
   /**
    * Apply a change still waiting for its frame, then have the app settle the
@@ -316,7 +317,7 @@
 {#snippet swatches(t: Theme)}
   <span class="flex shrink-0 gap-0.5">
     {#each [t.colors.page, t.colors.text, t.colors.accent] as c, i (i)}
-      <span class="size-2.5 rounded-full border border-black/15" style="background:{c}"></span>
+      <span class="size-2.5 rounded-full border border-black/15" style="background-color:{c}"></span>
     {/each}
   </span>
 {/snippet}
@@ -329,7 +330,9 @@
   action="Save"
   onsubmit={(name) => {
     saveAsOpen = false;
-    app.saveThemeAs(name);
+    const target = replaceTarget(app.themes, name);
+    if (target) replaceTargetTheme = target;
+    else app.saveThemeAs(name);
   }}
   oncancel={() => (saveAsOpen = false)}
 />
@@ -346,6 +349,32 @@
   }}
   oncancel={() => (renameOpen = false)}
 />
+
+<AlertDialog.Root
+  open={replaceTargetTheme !== null}
+  onOpenChange={(o) => !o && (replaceTargetTheme = null)}
+>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>Replace “{replaceTargetTheme?.name}”?</AlertDialog.Title>
+      <AlertDialog.Description>
+        You already have a theme with this name. Its colours will be replaced by the ones shown now.
+      </AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+      <AlertDialog.Action
+        onclick={() => {
+          const t = replaceTargetTheme;
+          replaceTargetTheme = null;
+          if (t) app.replaceTheme(t.id);
+        }}
+      >
+        Replace
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
 
 <AlertDialog.Root open={deleteOpen} onOpenChange={(o) => !o && (deleteOpen = false)}>
   <AlertDialog.Content>

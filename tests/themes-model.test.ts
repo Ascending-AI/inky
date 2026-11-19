@@ -23,7 +23,7 @@ const LIGHT_FIXTURE: Record<string, string> = {
   "--prose-quote-border": "oklch(0.87 0.006 286.32)",
   "--editor-selection": "oklch(0.62 0.19 260 / 22%)",
   "--comment-mark": "rgb(250 204 21)",
-  "--tab-strip": "color-mix(in oklab, var(--foreground) 3.5%, var(--background))",
+  "--tab-strip": "color-mix(in oklab, oklch(0.141 0.005 285.823) 3.5%, oklch(1 0 0))",
   "--card": "oklch(1 0 0)",
   "--card-foreground": "oklch(0.141 0.005 285.823)",
   "--popover": "oklch(1 0 0)",
@@ -61,7 +61,7 @@ const DARK_FIXTURE: Record<string, string> = {
   "--prose-quote-border": "oklch(0.42 0.008 264)",
   "--editor-selection": "oklch(0.62 0.19 260 / 38%)",
   "--comment-mark": "rgb(250 204 21)",
-  "--tab-strip": "color-mix(in oklab, black 12%, var(--background))",
+  "--tab-strip": "color-mix(in oklab, black 12%, oklch(0.245 0.006 264))",
   "--card": "oklch(0.285 0.006 264)",
   "--card-foreground": "oklch(0.95 0.004 264)",
   "--popover": "oklch(0.285 0.006 264)",
@@ -99,7 +99,7 @@ const BOOK_FIXTURE: Record<string, string> = {
   "--prose-quote-border": "oklch(0.8 0.03 80)",
   "--editor-selection": "oklch(0.78 0.09 85 / 50%)",
   "--comment-mark": "rgb(250 204 21)",
-  "--tab-strip": "color-mix(in oklab, var(--foreground) 3.5%, var(--background))",
+  "--tab-strip": "color-mix(in oklab, oklch(0.3 0.03 60) 3.5%, oklch(0.955 0.018 84))",
   "--card": "oklch(0.97 0.014 84)",
   "--card-foreground": "oklch(0.3 0.03 60)",
   "--popover": "oklch(0.97 0.014 84)",
@@ -237,5 +237,33 @@ describe("serializeTheme", () => {
     expect(s.startsWith('{\n  "inkyTheme": 1,')).toBe(true);
     expect(s).not.toContain('"ui"');
     expect(s).not.toContain('"syntax"');
+  });
+});
+
+describe("colour checking", () => {
+  const theme = (tabStrip: string) =>
+    JSON.stringify({ inkyTheme: 1, name: "X", kind: "light", colors: { ...LIGHT.colors, tabStrip } });
+
+  it("re-imports every serialized built-in with no warnings", () => {
+    for (const t of BUILT_IN) {
+      const r = parseTheme(serializeTheme(t));
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.warnings).toEqual([]);
+    }
+  });
+
+  it("drops colours that can load or reference something", () => {
+    for (const bad of [
+      "var(--x, url(https://host/p.png))",
+      "url(https://host/p.png)",
+      "VAR(--x)",
+      "image-set(red 1x)",
+      "image(red)",
+      "linear-gradient(red, blue)",
+    ]) {
+      const r = parseTheme(theme(bad));
+      expect(r.ok && r.warnings.length).toBe(1);
+      expect(r.ok && r.theme.colors.tabStrip).toBeUndefined();
+    }
   });
 });

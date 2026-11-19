@@ -187,8 +187,12 @@ export function resolveTheme(t: Theme): Record<string, string> {
 const COLOR_FN = /^(rgb|rgba|hsl|hsla|oklch|oklab|lab|lch|color-mix|color)\(.+\)$/i;
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 
+/** Anything that can fetch or reference something: a colour is never one of these. */
+const FORBIDDEN_FN = /(var|url|image|image-set|gradient)\(/i;
+
 function defaultIsColor(v: string): boolean {
   const s = v.trim();
+  if (FORBIDDEN_FN.test(s)) return false;
   if (typeof CSS !== "undefined" && typeof CSS.supports === "function") {
     return CSS.supports("color", s);
   }

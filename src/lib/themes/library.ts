@@ -5,6 +5,7 @@
 import { BUILT_IN, LIGHT } from "./builtin";
 import { READY_MADE } from "./readymade";
 import {
+  EXACT_KEYS,
   MAIN_KEYS,
   parseTheme,
   serializeTheme,
@@ -65,10 +66,29 @@ export interface EditState {
   mainsTouched: boolean;
 }
 
+/**
+ * Custom and your own themes store the optional colours the user set by hand
+ * (the rest is derived), so those start pinned. Built-in and ready-made themes
+ * set every colour explicitly; theirs re-derive once a main colour changes.
+ */
 export function beginEdit(start: Theme): EditState {
   const mains = {} as MainColors;
   for (const k of MAIN_KEYS) mains[k] = start.colors[k];
-  return { start, mains, kind: start.kind, pinned: {}, mainsTouched: false };
+  const pinned: Partial<ExactColors> = {};
+  const g = themeGroup(start.id);
+  if (g === "custom" || g === "yours") {
+    for (const k of EXACT_KEYS) {
+      const v = start.colors[k];
+      if (v !== undefined) pinned[k] = v;
+    }
+  }
+  return { start, mains, kind: start.kind, pinned, mainsTouched: false };
+}
+
+/** The theme of yours that Save as… `name` would replace (name match ignoring case), if any. */
+export function replaceTarget(themes: readonly Theme[], name: string): Theme | null {
+  const n = name.trim().toLowerCase();
+  return themes.find((t) => themeGroup(t.id) === "yours" && t.name.trim().toLowerCase() === n) ?? null;
 }
 
 /** The Custom theme an edit state describes. */

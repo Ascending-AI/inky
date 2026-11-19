@@ -28,6 +28,12 @@ describe("typography", () => {
     expect(loadTypography().typeface).toBe("default");
   });
 
+  it("a book user with no stored typography keeps the serif typeface", () => {
+    expect(loadTypography("book").typeface).toBe("iowan");
+    expect(loadTypography("light").typeface).toBe("default");
+    expect(loadTypography().typeface).toBe("default");
+  });
+
   it("Default typeface uses the system font", () => {
     const vars = typographyVars({ ...DEFAULT_TYPOGRAPHY, typeface: "default" });
     expect(vars["--prose-font"]).toContain("-apple-system");

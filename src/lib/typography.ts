@@ -96,8 +96,10 @@ export function loadTypography(storedThemeId?: string): Typography {
 }
 
 function legacyTypeface(stored: unknown, storedThemeId?: string): Typeface {
-  if (stored === "theme") return storedThemeId === "book" ? "iowan" : "default";
-  return typeof stored === "string" && stored in TYPEFACES ? (stored as Typeface) : "default";
+  if (typeof stored === "string" && stored !== "theme" && stored in TYPEFACES) return stored as Typeface;
+  // Missing (never opened Reading settings), the old "theme" value, or junk:
+  // what the theme used to say, serif for Book and system otherwise.
+  return storedThemeId === "book" ? "iowan" : "default";
 }
 
 export function saveTypography(t: Typography) {

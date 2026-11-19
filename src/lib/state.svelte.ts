@@ -538,7 +538,14 @@ class AppState {
 
   /** Read the saved themes and Custom; fall back to Light if the active theme is gone. */
   async loadThemes() {
-    const files = await invoke<{ id: string; json: string }[]>("list_themes").catch(() => []);
+    let files: { id: string; json: string }[] = [];
+    let listed = true;
+    try {
+      files = await invoke<{ id: string; json: string }[]>("list_themes");
+    } catch (e) {
+      listed = false;
+      console.warn(`Could not read saved themes: ${e}`);
+    }
     const loaded = loadThemeFiles(files);
     for (const w of loaded.warnings) console.warn(w);
     this.customBasedOn = loaded.customBasedOn;
@@ -546,10 +553,12 @@ class AppState {
     if (loaded.custom) list.push(loaded.custom);
     this.#setThemes(list);
     const { missing } = activeOrFallback(this.themes, this.themeId);
-    if (missing) {
+    if (missing && listed) {
       toast.info(`Theme "${this.themeId}" is no longer available. Using Light.`);
       this.themeId = "light";
     }
+    // When the list could not be read, the stored id stays: `activeTheme` shows
+    // Light for this session without forgetting the choice.
   }
 
   /**
@@ -622,13 +631,27 @@ class AppState {
   /** Save the shown theme as a new theme of yours; it becomes active. */
   async saveThemeAs(name: string) {
     const source = this.activeTheme;
-    const others = this.themes.filter((t) => t.id !== "custom");
     const id = slugFor(name, new Set(this.themes.map((t) => t.id)));
     const saved: Theme = {
       ...source,
       id,
-      name: uniqueName(name, others.map((t) => t.name)),
+      name: uniqueName(name, this.themes.map((t) => t.name).concat("Custom")),
     };
+    if (!(await this.#writeTheme(saved))) return;
+    this.#putTheme(saved);
+    if (source.id === "custom") {
+      this.customBasedOn = id;
+      this.#writeCustom();
+    }
+    this.setTheme(id);
+  }
+
+  /** Overwrite the theme of yours `id` with the shown colours (keeping its id and name); it becomes active. */
+  async replaceTheme(id: string) {
+    const target = this.themes.find((t) => t.id === id);
+    if (!target || themeGroup(id) !== "yours") return;
+    const source = this.activeTheme;
+    const saved: Theme = { ...source, id, name: target.name };
     if (!(await this.#writeTheme(saved))) return;
     this.#putTheme(saved);
     if (source.id === "custom") {
@@ -642,7 +665,7 @@ class AppState {
     const t = this.themes.find((x) => x.id === id);
     if (!t || themeGroup(id) !== "yours") return;
     const others = this.themes.filter((x) => x.id !== id && x.id !== "custom");
-    const renamed: Theme = { ...t, name: uniqueName(name, others.map((x) => x.name)) };
+    const renamed: Theme = { ...t, name: uniqueName(name, others.map((x) => x.name).concat("Custom")) };
     if (!(await this.#writeTheme(renamed))) return;
     this.#putTheme(renamed);
   }

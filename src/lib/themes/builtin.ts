@@ -5,8 +5,11 @@
  */
 import type { Theme } from "./model";
 
-const STRIP_LIGHT = "color-mix(in oklab, var(--foreground) 3.5%, var(--background))";
-const STRIP_DARK = "color-mix(in oklab, black 12%, var(--background))";
+// The tab strip is a plain colour: the same mix the stylesheet always made, with
+// each theme's own text and page colours written out.
+const STRIP_LIGHT = "color-mix(in oklab, oklch(0.141 0.005 285.823) 3.5%, oklch(1 0 0))";
+const STRIP_DARK = "color-mix(in oklab, black 12%, oklch(0.245 0.006 264))";
+const STRIP_BOOK = "color-mix(in oklab, oklch(0.3 0.03 60) 3.5%, oklch(0.955 0.018 84))";
 
 export const LIGHT: Theme = {
   id: "light",
@@ -119,7 +122,7 @@ export const BOOK: Theme = {
     quoteBar: "oklch(0.8 0.03 80)",
     selection: "oklch(0.78 0.09 85 / 50%)",
     commentMark: "rgb(250 204 21)",
-    tabStrip: STRIP_LIGHT,
+    tabStrip: STRIP_BOOK,
   },
   ui: {
     card: "oklch(0.97 0.014 84)",

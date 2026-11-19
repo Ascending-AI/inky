@@ -949,7 +949,7 @@
   align-items: flex-end;
   height: 38px;
   padding: 0 10px;
-  background: var(--tab-strip);
+  background-color: var(--tab-strip);
   overflow-x: auto;
   scrollbar-width: none;
 }

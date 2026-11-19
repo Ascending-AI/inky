@@ -30,13 +30,13 @@
   const swatch = $derived(value ? value.slice(0, 7) : "#000000");
 
   function normalize(s: string): string | null {
-    const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(s.trim());
+    const m = /^#?([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(s.trim());
     if (!m) return null;
-    const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join("") : m[1];
+    const h = m[1].length <= 4 ? [...m[1]].map((c) => c + c).join("") : m[1];
     return `#${h.toLowerCase()}`;
   }
 
-  /** Accept a typed `#rgb` / `#rrggbb`; anything else restores the previous value. */
+  /** Accept a typed `#rgb` / `#rgba` / `#rrggbb` / `#rrggbbaa`; anything else restores the previous value. */
   function commit() {
     const hex = normalize(text);
     text = shown;
@@ -44,8 +44,12 @@
   }
 
   function picked(e: Event) {
-    const hex = (e.currentTarget as HTMLInputElement).value.toLowerCase();
-    if (auto || hex !== swatch.toLowerCase()) onpick(hex);
+    const rgb = (e.currentTarget as HTMLInputElement).value.toLowerCase();
+    if (auto || rgb !== swatch.toLowerCase()) {
+      // The picker has no alpha: keep the colour's own.
+      const alpha = !auto && value && value.length === 9 ? value.slice(7) : "";
+      onpick(rgb + alpha);
+    }
   }
 </script>
 

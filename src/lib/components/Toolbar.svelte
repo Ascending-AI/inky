@@ -647,7 +647,7 @@
             <DropdownMenu.Item onclick={() => app.setTheme(t.id)}>
               <span class="flex gap-0.5">
                 {#each [t.colors.page, t.colors.text, t.colors.accent] as c}
-                  <span class="size-2.5 rounded-full border border-black/15" style="background:{c}"></span>
+                  <span class="size-2.5 rounded-full border border-black/15" style="background-color:{c}"></span>
                 {/each}
               </span>
               <span class="flex-1">{t.name}</span>
