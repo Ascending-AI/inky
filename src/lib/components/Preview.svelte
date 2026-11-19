@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
-  import { convertFileSrc } from "@tauri-apps/api/core";
   import { app, type CommentDraft } from "$lib/state.svelte";
   import { toggleTaskMarker } from "$lib/tasks";
   import {
@@ -98,15 +97,29 @@
   function resolveLocalImages(root: ParentNode | undefined = container, docPath = app.currentPath) {
     if (!root || !docPath) return;
     const dir = docPath.slice(0, docPath.lastIndexOf("/"));
+    const shown: string[] = [];
     for (const img of root.querySelectorAll("img")) {
       const src = img.getAttribute("src") ?? "";
       if (!src || /^(https?:|data:|blob:|asset:|\/\/)/.test(src)) continue;
       const abs = src.startsWith("/") ? src : `${dir}/${src.replace(/^\.\//, "")}`;
       // Remember the markdown path so rich edits write it back unchanged.
       img.dataset.mdSrc = src;
-      img.src = convertFileSrc(abs);
+      img.dataset.absSrc = abs;
+      img.src = img.dataset.shownUrl = app.imageUrl(abs);
+      shown.push(abs);
     }
+    if (shown.length) app.checkImages(shown);
   }
+
+  // A picture replaced on disk gets a new version: reload it where it shows.
+  $effect(() => {
+    app.imageVersions;
+    if (!container) return;
+    for (const img of container.querySelectorAll<HTMLImageElement>("img[data-abs-src]")) {
+      const url = app.imageUrl(img.dataset.absSrc!);
+      if (img.dataset.shownUrl !== url) img.src = img.dataset.shownUrl = url;
+    }
+  });
 
   // --- comment and reader highlights ---------------------------------------
   /** Re-wrap comment quotes and reader highlights (both anchor to text). */

@@ -35,7 +35,7 @@ const ask = vi.fn(async (_message: string, _opts?: unknown) => false);
 const toast = { error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn() };
 const win = { setTitle: vi.fn(), destroy: vi.fn(), close: vi.fn(), onCloseRequested: vi.fn() };
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke, convertFileSrc: (p: string) => `asset://localhost${p}` }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 vi.mock("@tauri-apps/api/path", () => ({ homeDir: vi.fn(async () => "/home") }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => win }));

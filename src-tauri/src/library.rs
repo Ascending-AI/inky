@@ -55,6 +55,32 @@ pub fn is_image(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// File stamps (modified time and size) of the images among `paths`, so the
+/// app can tell when a picture was replaced in place and reload it. Answers
+/// only for existing image files under `home`, the same files the asset
+/// protocol may already serve; anything else is left out.
+pub fn image_stamps(paths: &[String], home: &Path) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    for raw in paths {
+        let p = Path::new(raw);
+        if !p.is_absolute() || !is_image(p) || !p.starts_with(home) {
+            continue;
+        }
+        let Ok(meta) = fs::metadata(p) else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        let modified = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        out.insert(raw.clone(), format!("{modified}-{}", meta.len()));
+    }
+    out
+}
+
 /// Folders never shown, searched or watched: build output, dependencies,
 /// virtualenvs. Hidden entries are skipped too.
 pub const SKIP_DIRS: [&str; 7] = ["node_modules", "target", "dist", "build", "__pycache__", ".venv", "venv"];
@@ -991,6 +1017,36 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let lib = Library::open(dir.path()).unwrap();
         (dir, lib)
+    }
+
+    #[test]
+    fn image_stamps_change_when_a_picture_is_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let img = dir.path().join("chart.png");
+        fs::write(&img, b"old").unwrap();
+        let path = img.to_string_lossy().into_owned();
+        let first = image_stamps(&[path.clone()], dir.path());
+        assert!(first.contains_key(&path));
+        fs::write(&img, b"newer bytes").unwrap();
+        let second = image_stamps(&[path.clone()], dir.path());
+        assert_ne!(first[&path], second[&path]);
+    }
+
+    #[test]
+    fn image_stamps_only_answer_for_images_inside_home() {
+        let home = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let doc = home.path().join("notes.md");
+        let outside = elsewhere.path().join("a.png");
+        fs::write(&doc, "x").unwrap();
+        fs::write(&outside, "x").unwrap();
+        let paths = [
+            doc.to_string_lossy().into_owned(),
+            outside.to_string_lossy().into_owned(),
+            home.path().join("missing.png").to_string_lossy().into_owned(),
+            "relative.png".to_string(),
+        ];
+        assert!(image_stamps(&paths, home.path()).is_empty());
     }
 
     // --- Task 1: core + guarding -------------------------------------------

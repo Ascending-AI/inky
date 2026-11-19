@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -46,6 +46,7 @@ import {
   type NavHistory,
 } from "./navhistory";
 import { FONT_SCALES, clampScale, stepScale } from "./zoom";
+import { applyStamps } from "./imagestamps";
 import {
   activeTab,
   addTab,
@@ -129,6 +130,9 @@ class AppState {
   showHidden = $state(false);
   /** Sidebar folders the reader expanded (absolute paths); all others start closed. */
   expandedDirs = new SvelteSet<string>();
+  /** Local images replaced on disk this session: path → stamp (see $lib/imagestamps). */
+  imageVersions = $state<Record<string, string>>({});
+  #imageStamps = new Map<string, string>();
   currentPath = $state<string | null>(null);
   /** What changed in the open document since the reader last read it. */
   changes = $state<ChangeSet | null>(null);
@@ -1046,8 +1050,32 @@ class AppState {
     await this.refreshTree();
   }
 
+  /** Asset URL for a local image, versioned once the file changed on disk. */
+  imageUrl(path: string): string {
+    const version = this.imageVersions[path];
+    const url = convertFileSrc(path);
+    return version ? `${url}?v=${encodeURIComponent(version)}` : url;
+  }
+
+  /**
+   * Check the files behind shown images (default: every image shown this
+   * session). The first check of an image records its baseline; a later
+   * change bumps its version, and every place showing it reloads it.
+   */
+  async checkImages(paths: string[] = [...this.#imageStamps.keys()]) {
+    if (!paths.length) return;
+    try {
+      const stamps = await invoke<Record<string, string>>("image_stamps", { paths });
+      applyStamps(this.#imageStamps, this.imageVersions, stamps);
+    } catch {
+      // Stamps are a convenience: images still show, just possibly cached.
+    }
+  }
+
   async syncFromDisk() {
     await this.refreshTree();
+    // Agents replace pictures without touching the document's text.
+    this.checkImages();
     const path = this.currentPath;
     if (path && this.#editingInPlace) {
       // Swapping the text under an open in-place edit would misplace it.

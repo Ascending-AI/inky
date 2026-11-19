@@ -425,6 +425,15 @@ fn open_recent(app: tauri::AppHandle, path: String) -> Result<String, String> {
     Ok(to_string(granted))
 }
 
+/// Stamps of shown images, so pictures an agent replaced are reloaded.
+#[tauri::command]
+fn image_stamps(paths: Vec<String>) -> std::collections::HashMap<String, String> {
+    match dirs::home_dir() {
+        Some(home) => library::image_stamps(&paths, &home),
+        None => Default::default(),
+    }
+}
+
 #[tauri::command]
 fn path_exists(path: String) -> bool {
     Path::new(&path).exists()
@@ -1099,6 +1108,7 @@ pub fn run() {
             delete_path,
             move_path,
             path_exists,
+            image_stamps,
             print_document,
             set_menu_checked,
             save_image,

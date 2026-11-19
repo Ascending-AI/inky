@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { convertFileSrc } from "@tauri-apps/api/core";
   import { toast } from "svelte-sonner";
   import { app } from "$lib/state.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -13,8 +12,12 @@
   const paths = $derived(app.imageSiblings.includes(path) ? app.imageSiblings : [path]);
   const index = $derived(paths.indexOf(path));
   const items = $derived<MediaItem[]>(
-    paths.map((p) => ({ kind: "img", src: convertFileSrc(p), title: p.split("/").pop() ?? p })),
+    paths.map((p) => ({ kind: "img", src: app.imageUrl(p), title: p.split("/").pop() ?? p })),
   );
+  // Record these images' files, so a later replacement reloads them.
+  $effect(() => {
+    app.checkImages(paths);
+  });
 
   async function openExternally() {
     const { openPath } = await import("@tauri-apps/plugin-opener");
