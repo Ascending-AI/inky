@@ -148,9 +148,9 @@
   {/each}
 {/snippet}
 
-<!-- pl-[76px] clears the macOS traffic lights (overlay title bar) -->
+<!-- pl-[88px] clears the macOS traffic lights (overlay title bar) -->
 <header
-  class="no-print flex h-12 shrink-0 items-center gap-1 border-b bg-background pr-2 pl-[76px]"
+  class="no-print flex h-12 shrink-0 items-center gap-1 border-b bg-background pr-2 pl-[88px]"
   data-tauri-drag-region
 >
   <Tooltip.Provider delayDuration={400}>
