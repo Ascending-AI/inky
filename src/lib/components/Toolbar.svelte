@@ -27,6 +27,8 @@
   import FileDown from "@lucide/svelte/icons/file-down";
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
+  import Check from "@lucide/svelte/icons/check";
+  import { shortThemeSections } from "$lib/themes/library";
   import SunMedium from "@lucide/svelte/icons/sun-medium";
   import Moon from "@lucide/svelte/icons/moon";
   import BookOpenText from "@lucide/svelte/icons/book-open-text";
@@ -78,9 +80,10 @@
   ];
 
   const ThemeIcon = $derived(
-    app.theme === "dark" ? Moon : app.theme === "book" ? BookOpenText : SunMedium,
+    app.themeKind === "dark" ? Moon : app.themeId === "book" ? BookOpenText : SunMedium,
   );
 
+  let readingOpen = $state(false);
   let editingTitle = $state(false);
   let titleDraft = $state("");
 
@@ -459,7 +462,7 @@
       <Tooltip.Content>Export PDF (⌘E)</Tooltip.Content>
     </Tooltip.Root>
 
-    <Popover.Root>
+    <Popover.Root bind:open={readingOpen}>
       <Popover.Trigger>
         {#snippet child({ props })}
           <Button {...props} variant="ghost" size="icon" title="Reading settings">
@@ -597,6 +600,23 @@
               Loading an image from the web tells its server you opened the document.
             </p>
           </div>
+          <div class="grid gap-2">
+            <span class="text-xs font-medium text-muted-foreground">Colour theme</span>
+            <div class="flex items-center justify-between gap-2">
+              <span class="min-w-0 truncate text-sm">{app.activeTheme.name}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-7 px-2 text-xs"
+                onclick={() => {
+                  readingOpen = false;
+                  app.openThemeEditor();
+                }}
+              >
+                Edit Themes…
+              </Button>
+            </div>
+          </div>
           {#if !isDefaultTypography(app.typography)}
             <Button
               variant="ghost"
@@ -619,16 +639,27 @@
           </Button>
         {/snippet}
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="end">
-        <DropdownMenu.Item onclick={() => app.setTheme("light")}>
-          <SunMedium class="size-4" /> Light
+      <DropdownMenu.Content align="end" class="max-h-[70vh] w-56 overflow-y-auto">
+        {#each shortThemeSections(app.themes, app.recentThemeIds, app.themeId) as sec, i (sec.label)}
+          {#if i > 0}<DropdownMenu.Separator />{/if}
+          <DropdownMenu.Label class="text-xs text-muted-foreground">{sec.label}</DropdownMenu.Label>
+          {#each sec.items as t (t.id)}
+            <DropdownMenu.Item onclick={() => app.setTheme(t.id)}>
+              <span class="flex gap-0.5">
+                {#each [t.colors.page, t.colors.text, t.colors.accent] as c}
+                  <span class="size-2.5 rounded-full border border-black/15" style="background-color:{c}"></span>
+                {/each}
+              </span>
+              <span class="min-w-0 flex-1 truncate whitespace-nowrap">{t.name}</span>
+              {#if t.id === app.themeId}<Check class="size-4" />{/if}
+            </DropdownMenu.Item>
+          {/each}
+        {/each}
+        <DropdownMenu.Separator />
+        <DropdownMenu.Item onclick={() => app.themesPanelVisible || app.toggleThemesPanel()}>
+          All Themes…
         </DropdownMenu.Item>
-        <DropdownMenu.Item onclick={() => app.setTheme("dark")}>
-          <Moon class="size-4" /> Dark
-        </DropdownMenu.Item>
-        <DropdownMenu.Item onclick={() => app.setTheme("book")}>
-          <BookOpenText class="size-4" /> Book
-        </DropdownMenu.Item>
+        <DropdownMenu.Item onclick={() => app.openThemeEditor()}>Edit Themes…</DropdownMenu.Item>
       </DropdownMenu.Content>
     </DropdownMenu.Root>
 

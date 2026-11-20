@@ -19,8 +19,10 @@
   import LibrarySearch from "$lib/components/LibrarySearch.svelte";
   import HistoryPanel from "$lib/components/HistoryPanel.svelte";
   import HighlightsPanel from "$lib/components/HighlightsPanel.svelte";
+  import ThemesPanel from "$lib/components/ThemesPanel.svelte";
   import ConflictDialog from "$lib/components/ConflictDialog.svelte";
   import McpSetupDialog from "$lib/components/McpSetupDialog.svelte";
+  import ThemeEditor from "$lib/components/ThemeEditor.svelte";
   import ImagePreview from "$lib/components/ImagePreview.svelte";
   import ZoomViewer from "$lib/components/ZoomViewer.svelte";
   import * as Resizable from "$lib/components/ui/resizable/index.js";
@@ -65,15 +67,17 @@
       focus_mode: () => app.toggleFocusMode(),
       quick_open: () => (app.quickOpenVisible = true),
       check_updates: () => app.checkForUpdates(true),
-      theme_light: () => app.setTheme("light"),
-      theme_dark: () => app.setTheme("dark"),
-      theme_book: () => app.setTheme("book"),
+      edit_themes: () => app.openThemeEditor(),
       font_plus: () => app.adjustFontScale(1),
       font_minus: () => app.adjustFontScale(-1),
       quit_app: () => app.quitApp(),
     };
     if (id.startsWith("width_")) {
       app.setReadingWidth(id.slice(6) as ReadingWidth);
+      return;
+    }
+    if (id.startsWith("theme:")) {
+      app.setTheme(id.slice(6));
       return;
     }
     actions[id]?.();
@@ -423,6 +427,30 @@
         ></div>
       </div>
     {/if}
+    {#if ready && app.themesPanelVisible}
+      <div
+        class="no-print relative shrink-0"
+        style="width: {tocWidth}px"
+        transition:slide={{ axis: "x", duration: 220, easing: cubicOut }}
+      >
+        <div class="absolute inset-y-0 right-0" style="width: {tocWidth}px">
+          <ThemesPanel />
+        </div>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="absolute inset-y-0 -left-[3px] z-10 w-1.5 cursor-col-resize transition-colors hover:bg-ring/50 active:bg-ring/70"
+          onpointerdown={(e) =>
+            startPanelDrag(e, {
+              get: () => tocWidth,
+              set: (w) => (tocWidth = w),
+              sign: -1,
+              min: 200,
+              max: 480,
+              storageKey: "inky.tocWidth",
+            })}
+        ></div>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -430,3 +458,4 @@
 <LibrarySearch />
 <HistoryPanel />
 <McpSetupDialog />
+<ThemeEditor />

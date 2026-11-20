@@ -10,9 +10,33 @@ import {
 describe("typography", () => {
   beforeEach(() => localStorage.clear());
 
-  it("defaults leave every property to the theme", () => {
-    expect(Object.values(typographyVars(DEFAULT_TYPOGRAPHY)).every((v) => v === null)).toBe(true);
+  it("defaults to the system typeface and leaves spacing to the stylesheet", () => {
+    const vars = typographyVars(DEFAULT_TYPOGRAPHY);
+    expect(vars["--prose-leading"]).toBeNull();
+    expect(vars["--prose-para-gap"]).toBeNull();
     expect(isDefaultTypography(loadTypography())).toBe(true);
+  });
+
+  it("book users keep the serif typeface", () => {
+    localStorage.setItem("inky.typography", JSON.stringify({ typeface: "theme" }));
+    expect(loadTypography("book").typeface).toBe("iowan");
+  });
+
+  it("the old Theme typeface becomes Default", () => {
+    localStorage.setItem("inky.typography", JSON.stringify({ typeface: "theme" }));
+    expect(loadTypography("light").typeface).toBe("default");
+    expect(loadTypography().typeface).toBe("default");
+  });
+
+  it("a book user with no stored typography keeps the serif typeface", () => {
+    expect(loadTypography("book").typeface).toBe("iowan");
+    expect(loadTypography("light").typeface).toBe("default");
+    expect(loadTypography().typeface).toBe("default");
+  });
+
+  it("Default typeface uses the system font", () => {
+    const vars = typographyVars({ ...DEFAULT_TYPOGRAPHY, typeface: "default" });
+    expect(vars["--prose-font"]).toContain("-apple-system");
   });
 
   it("maps choices to CSS properties", () => {

@@ -242,7 +242,10 @@
     html;
     // A re-render replaces the code blocks the Copy button pointed at.
     codeCopy = null;
-    const theme = app.theme;
+    // Keyed on themeVersion alone: live theme-editor edits repaint through CSS
+    // and only bump it once they settle, so diagrams redo once, not per frame.
+    app.themeVersion;
+    const theme = untrack(() => app.activeTheme);
     app.commentThreads;
     if (!container) return;
     tick().then(async () => {
@@ -1277,7 +1280,7 @@
   }
 
   $effect(() => {
-    app.theme;
+    app.themeVersion;
     resetMermaidTheme();
     // Force re-render of mermaid blocks with the new theme.
     untrack(() => {

@@ -52,91 +52,11 @@
   --hl-attr: #22863a;
 
   --editor-selection: oklch(0.62 0.19 260 / 22%);
-}
 
-/* Anthracite: warm dark gray, never pure black */
-.dark {
-  color-scheme: dark;
-  --background: oklch(0.245 0.006 264);
-  --foreground: oklch(0.95 0.004 264);
-  --card: oklch(0.285 0.006 264);
-  --card-foreground: oklch(0.95 0.004 264);
-  --popover: oklch(0.285 0.006 264);
-  --popover-foreground: oklch(0.95 0.004 264);
-  --primary: oklch(0.92 0.004 286.32);
-  --primary-foreground: oklch(0.245 0.006 264);
-  --secondary: oklch(0.32 0.006 264);
-  --secondary-foreground: oklch(0.95 0.004 264);
-  --muted: oklch(0.32 0.006 264);
-  --muted-foreground: oklch(0.72 0.012 264);
-  --accent: oklch(0.34 0.007 264);
-  --accent-foreground: oklch(0.95 0.004 264);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.95 0.004 264);
-  --border: oklch(1 0 0 / 13%);
-  --input: oklch(1 0 0 / 17%);
-  --ring: oklch(0.58 0.014 264);
-  --sidebar: oklch(0.27 0.006 264);
-  --sidebar-foreground: oklch(0.95 0.004 264);
-  --sidebar-border: oklch(1 0 0 / 11%);
-
-  --prose-link: oklch(0.707 0.165 254.624);
-  --prose-code-bg: oklch(0.3 0.006 264);
-  --prose-quote-border: oklch(0.42 0.008 264);
-
-  --hl-comment: #8b949e;
-  --hl-keyword: #ff7b72;
-  --hl-string: #a5d6ff;
-  --hl-title: #d2a8ff;
-  --hl-number: #79c0ff;
-  --hl-attr: #7ee787;
-
-  --editor-selection: oklch(0.62 0.19 260 / 38%);
-}
-
-/* Book mode: warm paper, serif reading typography */
-.book {
-  color-scheme: light;
-  --background: oklch(0.955 0.018 84);
-  --foreground: oklch(0.3 0.03 60);
-  --card: oklch(0.97 0.014 84);
-  --card-foreground: oklch(0.3 0.03 60);
-  --popover: oklch(0.97 0.014 84);
-  --popover-foreground: oklch(0.3 0.03 60);
-  --primary: oklch(0.42 0.06 50);
-  --primary-foreground: oklch(0.97 0.014 84);
-  --secondary: oklch(0.91 0.02 84);
-  --secondary-foreground: oklch(0.35 0.04 55);
-  --muted: oklch(0.91 0.02 84);
-  --muted-foreground: oklch(0.5 0.03 60);
-  --accent: oklch(0.89 0.025 80);
-  --accent-foreground: oklch(0.32 0.04 55);
-  --destructive: oklch(0.55 0.2 28);
-  --destructive-foreground: oklch(0.97 0.014 84);
-  --border: oklch(0.87 0.02 80);
-  --input: oklch(0.87 0.02 80);
-  --ring: oklch(0.6 0.05 60);
-  --sidebar: oklch(0.935 0.02 84);
-  --sidebar-foreground: oklch(0.3 0.03 60);
-  --sidebar-border: oklch(0.87 0.02 80);
-
-  --prose-font: "Iowan Old Style", "Palatino", "Georgia", serif;
-  --prose-size: 1.0625rem;
-  --prose-leading: 1.85;
-  --prose-max-width: 42rem;
-  --prose-heading-font: var(--prose-font);
-  --prose-link: oklch(0.45 0.1 40);
-  --prose-code-bg: oklch(0.9 0.02 84);
-  --prose-quote-border: oklch(0.8 0.03 80);
-
-  --hl-comment: #8a7a66;
-  --hl-keyword: #a0430a;
-  --hl-string: #5c661f;
-  --hl-title: #7d4a9e;
-  --hl-number: #14657f;
-  --hl-attr: #3f6d34;
-
-  --editor-selection: oklch(0.78 0.09 85 / 50%);
+  /* Comment highlights and the tab strip; themes set these too. */
+  --tab-strip: color-mix(in oklab, var(--foreground) 3.5%, var(--background));
+  --comment-mark: rgb(250 204 21);
+  --comment-line: rgb(202 138 4);
 }
 
 @theme inline {
@@ -680,19 +600,19 @@
 
 .prose-doc mark.comment-hl,
 .editor-host .cm-comment-hl {
-  background: rgb(250 204 21 / 0.18);
-  border-bottom: 2px solid rgb(202 138 4 / 0.55);
+  background: color-mix(in srgb, var(--comment-mark) 18%, transparent);
+  border-bottom: 2px solid color-mix(in srgb, var(--comment-line) 55%, transparent);
   color: inherit;
   cursor: pointer;
   transition: background 0.15s ease;
 }
 .prose-doc mark.comment-hl:hover {
-  background: rgb(250 204 21 / 0.32);
+  background: color-mix(in srgb, var(--comment-mark) 32%, transparent);
 }
 .prose-doc mark.comment-hl.active,
 .editor-host .cm-comment-hl-active {
-  background: rgb(250 204 21 / 0.4);
-  border-bottom-color: rgb(202 138 4 / 0.9);
+  background: color-mix(in srgb, var(--comment-mark) 40%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--comment-line) 90%, transparent);
 }
 
 @media print {
@@ -1025,20 +945,16 @@
 /* ── Tab strip, after Chrome: flat tabs on a darker strip; the active tab is
    the page's own colour, with rounded tops that curve into the page. ── */
 .tab-strip {
-  --strip: color-mix(in oklab, var(--foreground) 3.5%, var(--background));
   display: flex;
   align-items: flex-end;
   height: 38px;
   padding: 0 10px;
-  background: var(--strip);
+  background-color: var(--tab-strip);
   overflow-x: auto;
   scrollbar-width: none;
 }
 .tab-strip::-webkit-scrollbar {
   display: none;
-}
-.dark .tab-strip {
-  --strip: color-mix(in oklab, black 12%, var(--background));
 }
 .tab {
   position: relative;
