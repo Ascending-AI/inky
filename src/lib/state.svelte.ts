@@ -63,6 +63,8 @@ import {
 } from "./navhistory";
 import { FONT_SCALES, clampScale, stepScale } from "./zoom";
 import { applyStamps } from "./imagestamps";
+import { displayLog } from "./displaylog";
+import { changesTree, type WatchChange } from "./librarychange";
 import {
   activeTab,
   addTab,
@@ -414,9 +416,18 @@ class AppState {
     });
 
     // Pick up documents created outside the app (e.g. via the MCP server).
-    window.addEventListener("focus", () => this.syncFromDisk());
+    window.addEventListener("focus", async () => {
+      const t0 = performance.now();
+      try {
+        await this.syncFromDisk();
+      } finally {
+        displayLog(`sync after focus ${Math.round(performance.now() - t0)} ms`);
+      }
+    });
     // The Rust side watches the library folder; agent edits show up live.
-    listen("library-changed", () => this.syncFromDisk());
+    listen<WatchChange[]>("library-changed", (e) =>
+      this.syncFromDisk({ tree: changesTree(e.payload, this.tree) }),
+    );
     // Never let a debounced autosave die with the focus.
     window.addEventListener("blur", () => {
       if (this.dirty && !this.conflict) this.save();
@@ -1246,9 +1257,17 @@ class AppState {
     }
   }
 
+  /** The tree as last read, to skip rebuilding the sidebar when nothing moved. */
+  #treeJson = "";
+
   async refreshTree() {
     try {
-      this.tree = await invoke<TreeNode[]>("list_tree", { showHidden: this.showHidden });
+      const tree = await invoke<TreeNode[]>("list_tree", { showHidden: this.showHidden });
+      const json = JSON.stringify(tree);
+      if (json !== this.#treeJson) {
+        this.#treeJson = json;
+        this.tree = tree;
+      }
       // An image deleted or moved away (in the app or on disk) leaves the preview.
       if (this.imagePath && !this.imageSiblings.includes(this.imagePath)) this.imagePath = null;
     } catch (e) {
@@ -1339,8 +1358,40 @@ class AppState {
     }
   }
 
-  async syncFromDisk() {
-    await this.refreshTree();
+  #syncing: Promise<void> | null = null;
+  #syncAgain = false;
+  #syncTree = false;
+
+  /**
+   * Catch up with changes made on disk (agents, other editors). Calls made
+   * while one runs are folded into a single follow-up run, so a stream of
+   * agent writes never stacks up refreshes. `tree: false` when the sidebar
+   * cannot have changed (only listed documents were edited).
+   */
+  syncFromDisk({ tree = true }: { tree?: boolean } = {}): Promise<void> {
+    if (tree) this.#syncTree = true;
+    if (this.#syncing) {
+      this.#syncAgain = true;
+      return this.#syncing;
+    }
+    this.#syncing = (async () => {
+      try {
+        do {
+          this.#syncAgain = false;
+          const withTree = this.#syncTree;
+          this.#syncTree = false;
+          await this.#syncOnce(withTree);
+        } while (this.#syncAgain);
+      } finally {
+        // Cleared in the same step as the last check, so no call slips between.
+        this.#syncing = null;
+      }
+    })();
+    return this.#syncing;
+  }
+
+  async #syncOnce(withTree: boolean) {
+    if (withTree) await this.refreshTree();
     // Agents replace pictures without touching the document's text.
     this.checkImages();
     const path = this.currentPath;

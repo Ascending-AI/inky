@@ -115,6 +115,31 @@ pub fn is_watch_relevant(root: &Path, path: &Path) -> bool {
     (is_doc(path) || is_image(path) || folder) && !is_skipped_path(rel) && !ignores::is_hidden(root, path)
 }
 
+/// One changed path the frontend should hear about. A document that still
+/// exists and is already in the sidebar only needs re-reading; anything else
+/// (new, gone, a folder) changes the tree.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchChange {
+    pub path: String,
+    pub exists: bool,
+    pub is_dir: bool,
+}
+
+/// The watch-relevant paths among `paths`, once each, sorted.
+pub fn watch_changes<'a>(root: &Path, paths: impl IntoIterator<Item = &'a Path>) -> Vec<WatchChange> {
+    let relevant: std::collections::BTreeSet<&Path> =
+        paths.into_iter().filter(|p| is_watch_relevant(root, p)).collect();
+    relevant
+        .into_iter()
+        .map(|p| WatchChange {
+            path: p.to_string_lossy().into_owned(),
+            exists: p.exists(),
+            is_dir: p.is_dir(),
+        })
+        .collect()
+}
+
 /// Replace `path`'s contents in one step: write a hidden temporary file next
 /// to it, then rename it over the original. Readers (agents, editors, the
 /// watcher) see the old file or the new one, never a half-written one. A
@@ -1326,6 +1351,29 @@ mod tests {
         assert!(!r(".git/.a.md.comments.json"));
         assert!(!r("real/notes.txt"));
         assert!(r("real/photo.PNG"), "images show in the tree");
+    }
+
+    #[test]
+    fn watch_changes_keep_relevant_paths_once_with_their_kind() {
+        let (_d, _e, root) = cluttered_root();
+        let doc = root.join("real/a.md");
+        let paths = [
+            doc.clone(),
+            root.join("real"),
+            root.join("gone.md"),
+            root.join("node_modules/x.md"),
+            doc.clone(),
+        ];
+        let changes = watch_changes(&root, paths.iter().map(|p| p.as_path()));
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        assert_eq!(
+            changes,
+            vec![
+                WatchChange { path: s(&root.join("gone.md")), exists: false, is_dir: false },
+                WatchChange { path: s(&root.join("real")), exists: true, is_dir: true },
+                WatchChange { path: s(&doc), exists: true, is_dir: false },
+            ]
+        );
     }
 
     #[test]

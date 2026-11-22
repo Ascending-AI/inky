@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 pub mod baselines;
+pub mod displaylog;
 pub mod ignores;
 pub mod library;
 pub mod mcp;
@@ -219,7 +220,9 @@ fn set_library_root(app: tauri::AppHandle, path: String) -> Result<String, Strin
     Ok(root)
 }
 
-#[tauri::command]
+// Async commands run off the main thread: walking a big library takes a
+// while, and the window cannot draw until the main thread is free.
+#[tauri::command(async)]
 fn list_tree(app: tauri::AppHandle, show_hidden: Option<bool>) -> Result<Vec<Node>, String> {
     Ok(active_library(&app)?.tree_with(show_hidden.unwrap_or(false)))
 }
@@ -253,22 +256,22 @@ fn write_doc(
     place(&app, &path)?.doc(&path)?.write_if(&path, &content, expected.as_deref())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn doc_sidecars(app: tauri::AppHandle, path: String) -> Result<bool, String> {
     Ok(place(&app, &path)?.sidecars())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_versions(app: tauri::AppHandle, path: String) -> Result<Vec<VersionInfo>, String> {
     place(&app, &path)?.doc(&path)?.list_versions(&path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn read_version(app: tauri::AppHandle, path: String, version: String) -> Result<String, String> {
     place(&app, &path)?.doc(&path)?.read_version(&path, &version)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn search_library(app: tauri::AppHandle, query: String) -> Result<Vec<SearchHit>, String> {
     Ok(active_library(&app)?.search(&query))
 }
@@ -301,7 +304,7 @@ fn rename_path(app: tauri::AppHandle, path: String, new_name: String) -> Result<
     Ok(to_string(new))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn read_comments(app: tauri::AppHandle, doc_path: String) -> Result<String, String> {
     place(&app, &doc_path)?.doc(&doc_path)?.raw_comments(&doc_path)
 }
@@ -427,7 +430,7 @@ fn open_recent(app: tauri::AppHandle, path: String) -> Result<String, String> {
 }
 
 /// Stamps of shown images, so pictures an agent replaced are reloaded.
-#[tauri::command]
+#[tauri::command(async)]
 fn image_stamps(paths: Vec<String>) -> std::collections::HashMap<String, String> {
     match dirs::home_dir() {
         Some(home) => library::image_stamps(&paths, &home),
@@ -492,11 +495,11 @@ fn start_watcher(app: &tauri::AppHandle) {
         move |result: notify_debouncer_mini::DebounceEventResult| {
             // Builds in node_modules/target/…, `.git` churn and history
             // snapshots don't concern the sidebar.
-            let relevant = result
-                .map(|events| events.iter().any(|e| library::is_watch_relevant(&root, &e.path)))
-                .unwrap_or(false);
-            if relevant {
-                let _ = handle.emit("library-changed", ());
+            let changes = result
+                .map(|events| library::watch_changes(&root, events.iter().map(|e| e.path.as_path())))
+                .unwrap_or_default();
+            if !changes.is_empty() {
+                let _ = handle.emit("library-changed", changes);
             }
         },
     );
@@ -541,7 +544,7 @@ fn highlights_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("highlights.json"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn read_highlights(app: tauri::AppHandle) -> Result<String, String> {
     Ok(fs::read_to_string(highlights_file(&app)?).unwrap_or_default())
 }
@@ -1162,6 +1165,12 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// A line for the display diagnostics log, from the page.
+#[tauri::command]
+fn display_log(app: tauri::AppHandle, line: String) {
+    displaylog::log(&app, &format!("page: {line}"));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     use tauri::Emitter;
@@ -1186,7 +1195,15 @@ pub fn run() {
         .manage(RecentMenu(std::sync::Mutex::new(RecentMenuState::default())))
         .manage(LibraryWatcher(std::sync::Mutex::new(None)))
         .manage(UndoStash(std::sync::Mutex::new(std::collections::HashMap::new())))
+        .on_page_load(|webview, payload| {
+            let event = match payload.event() {
+                tauri::webview::PageLoadEvent::Started => "started",
+                tauri::webview::PageLoadEvent::Finished => "finished",
+            };
+            displaylog::log(webview.app_handle(), &format!("page load {event}: {}", payload.url()));
+        })
         .setup(|app| {
+            displaylog::log(app.handle(), "app start");
             build_menu(app)?;
             purge_stash_dir(app.handle());
             start_watcher(app.handle());
@@ -1286,12 +1303,19 @@ pub fn run() {
             hide_path,
             unhide_path,
             read_highlights,
-            write_highlights
+            write_highlights,
+            display_log
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app_handle, event| match event {
+            tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::Focused(focused), .. } => {
+                displaylog::log(app_handle, if focused { "window focused" } else { "window unfocused" });
+            }
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => displaylog::log(app_handle, "dock reopen"),
             tauri::RunEvent::Exit => {
+                displaylog::log(app_handle, "app exit");
                 stop_mcp_server(&app_handle.state::<McpServer>());
                 purge_stash_dir(app_handle);
             }

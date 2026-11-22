@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { startDisplayLog } from "$lib/displaylog";
   import { slide } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { listen } from "@tauri-apps/api/event";
@@ -88,6 +89,7 @@
     tocWidth = storedWidth("inky.tocWidth", 256, 200, 480);
     configureSync(() => app.syncScroll && app.viewMode === "split");
     const unlisten = listen<string>("menu", (e) => handleMenu(e.payload));
+    startDisplayLog();
     app.init().then(() => (ready = true));
     // Registered by hand: they must be non-passive to stop the webview's own
     // pinch handling, and Svelte attaches wheel listeners as passive.
