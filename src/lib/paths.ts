@@ -58,6 +58,20 @@ export function isVideoPath(path: string): boolean {
   return VIDEO_RE.test(path);
 }
 
+/** `rel` resolved against the folder `dir` (an absolute `rel` stands as is). */
+export function resolveFrom(dir: string, rel: string): string {
+  if (rel.startsWith("/")) return rel;
+  const parts = dir.split("/");
+  for (const part of rel.split("/")) {
+    if (part === "..") {
+      if (parts.length > 1) parts.pop();
+    } else if (part !== "." && part !== "") {
+      parts.push(part);
+    }
+  }
+  return parts.join("/");
+}
+
 /** `path` after `from` was renamed or moved to `to` (unchanged if unaffected). */
 export function remapPath(path: string, from: string, to: string): string {
   if (path === from) return to;

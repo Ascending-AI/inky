@@ -22,7 +22,10 @@ open_document";
 const INSTRUCTIONS: &str = "Inky is the user's markdown library. Paths are relative to the library root. \
 Prefer patch_document over write_document for edits. Use open_document to show the user a document \
 (e.g. one you just wrote) in the Inky app. Comment threads marked open usually need an answer; \
-resolve a thread only after addressing it.";
+resolve a thread only after addressing it. \
+Videos in the library (.mp4, .mov, .m4v, .webm; write them with your own tools) play in Inky: embed one in a \
+document with image syntax, ![caption](relative/path.mp4), and link to a moment with \
+[2:15](relative/path.mp4#t=135) (seconds, or m:ss / h:mm:ss).";
 
 const DOC_URI_PREFIX: &str = "inky://doc/";
 
@@ -243,11 +246,11 @@ impl InkyMcp {
     #[tool(
         name = "open_document",
         annotations(title = "Show a document in Inky", read_only_hint = true),
-        description = "Open a document from the Inky library in the Inky app so the user sees it (launches Inky if needed). Use it after writing or editing a document the user should look at. The user can go back to what they were reading with ⌘[."
+        description = "Open a document or a video from the Inky library in the Inky app so the user sees it (launches Inky if needed). Use it after writing or editing a document the user should look at; a video opens in its own tab. The user can go back to what they were reading with ⌘[."
     )]
     async fn open_document(&self, Parameters(p): Parameters<PathParams>) -> CallToolResult {
         let result = self.lib.resolve(&p.path).and_then(|abs| {
-            if !abs.is_file() || !library::is_doc(&abs) {
+            if !abs.is_file() || !(library::is_doc(&abs) || library::is_video(&abs)) {
                 return Err(format!("Not a document in the Inky library: {}", p.path));
             }
             (self.opener)(&abs)?;
@@ -259,18 +262,19 @@ impl InkyMcp {
     #[tool(
         name = "list_documents",
         annotations(title = "List Inky documents"),
-        description = "List every document and folder in the user's Inky library. Paths are relative to the library root. Documents are markdown (.md) or standalone mermaid diagrams (.mmd)."
+        description = "List every document, video and folder in the user's Inky library. Paths are relative to the library root. Documents are markdown (.md) or standalone mermaid diagrams (.mmd); videos (.mp4, .mov, .m4v, .webm) play in Inky."
     )]
     async fn list_documents(&self) -> CallToolResult {
         let listing = self
             .lib
-            .walk()
+            .walk_with_videos()
             .into_iter()
             .map(|e| {
                 let icon = match e.kind {
                     EntryKind::Folder => "📁",
                     EntryKind::Mermaid => "🧜",
                     EntryKind::Markdown => "📄",
+                    EntryKind::Video => "🎬",
                 };
                 format!("{icon} {}", e.rel)
             })
@@ -921,6 +925,19 @@ mod tests {
         assert!(!err, "{msg}");
         assert!(msg.contains("Notes/a b.md"), "{msg}");
         assert_eq!(*opened.lock().unwrap(), vec![f.lib.root().join("Notes/a b.md")]);
+        f.server.abort();
+    }
+
+    #[tokio::test]
+    async fn agents_can_list_and_open_videos() {
+        let (f, opened) = fixture_recording_opens().await;
+        f.lib.write("Notes/a.md", "x").unwrap();
+        std::fs::write(f.lib.root().join("Notes/explainer.mp4"), b"v").unwrap();
+        let (_, listing) = call(&f, "list_documents", serde_json::json!({})).await;
+        assert!(listing.contains("🎬 Notes/explainer.mp4"), "{listing}");
+        let (err, msg) = call(&f, "open_document", serde_json::json!({"path": "Notes/explainer.mp4"})).await;
+        assert!(!err, "{msg}");
+        assert_eq!(*opened.lock().unwrap(), vec![f.lib.root().join("Notes/explainer.mp4")]);
         f.server.abort();
     }
 

@@ -64,15 +64,15 @@ pub fn is_video(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// File stamps (modified time and size) of the images among `paths`, so the
-/// app can tell when a picture was replaced in place and reload it. Answers
-/// only for existing image files under `home`, the same files the asset
-/// protocol may already serve; anything else is left out.
+/// File stamps (modified time and size) of the images and videos among
+/// `paths`, so the app can tell when one was replaced in place and reload it.
+/// Answers only for existing image and video files under `home`, the same
+/// files the asset protocol may already serve; anything else is left out.
 pub fn image_stamps(paths: &[String], home: &Path) -> std::collections::HashMap<String, String> {
     let mut out = std::collections::HashMap::new();
     for raw in paths {
         let p = Path::new(raw);
-        if !p.is_absolute() || !is_image(p) || !p.starts_with(home) {
+        if !p.is_absolute() || !(is_image(p) || is_video(p)) || !p.starts_with(home) {
             continue;
         }
         let Ok(meta) = fs::metadata(p) else { continue };
@@ -210,6 +210,8 @@ pub enum EntryKind {
     Folder,
     Markdown,
     Mermaid,
+    /// Only from `walk_with_videos`.
+    Video,
 }
 
 #[derive(Debug, Clone)]
@@ -342,7 +344,7 @@ fn build_tree(dir: &Path, opts: TreeOpts, rules: &Ignores, in_hidden: bool) -> V
 }
 
 /// Every visible folder and document below `dir` (`.inkyignore`d ones skipped).
-fn walk_into(dir: &Path, root: &Path, rules: &Ignores, out: &mut Vec<Entry>) {
+fn walk_into(dir: &Path, root: &Path, rules: &Ignores, videos: bool, out: &mut Vec<Entry>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -361,7 +363,9 @@ fn walk_into(dir: &Path, root: &Path, rules: &Ignores, out: &mut Vec<Entry>) {
         let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().into_owned();
         if is_dir {
             out.push(Entry { rel: format!("{rel}/"), kind: EntryKind::Folder });
-            walk_into(&path, root, &rules.enter(&path), out);
+            walk_into(&path, root, &rules.enter(&path), videos, out);
+        } else if videos && is_video(&path) {
+            out.push(Entry { rel, kind: EntryKind::Video });
         } else if is_doc(&path) {
             let kind = if name.to_lowercase().ends_with(".mmd") {
                 EntryKind::Mermaid
@@ -667,7 +671,14 @@ impl Library {
     /// paths; `.inkyignore`d ones are left out).
     pub fn walk(&self) -> Vec<Entry> {
         let mut out = Vec::new();
-        walk_into(&self.root, &self.root, &Ignores::default().enter(&self.root), &mut out);
+        walk_into(&self.root, &self.root, &Ignores::default().enter(&self.root), false, &mut out);
+        out
+    }
+
+    /// `walk`, with the library's videos listed too (for agents).
+    pub fn walk_with_videos(&self) -> Vec<Entry> {
+        let mut out = Vec::new();
+        walk_into(&self.root, &self.root, &Ignores::default().enter(&self.root), true, &mut out);
         out
     }
 
@@ -1081,6 +1092,18 @@ mod tests {
             "relative.png".to_string(),
         ];
         assert!(image_stamps(&paths, home.path()).is_empty());
+    }
+
+    #[test]
+    fn image_stamps_answer_for_videos_too() {
+        let home = tempfile::tempdir().unwrap();
+        let clip = home.path().join("explainer.mp4");
+        fs::write(&clip, "v1").unwrap();
+        let path = clip.to_string_lossy().into_owned();
+        let first = image_stamps(std::slice::from_ref(&path), home.path());
+        assert!(first.contains_key(&path), "an agent may replace a video in place");
+        fs::write(&clip, "version 2").unwrap();
+        assert_ne!(image_stamps(std::slice::from_ref(&path), home.path())[&path], first[&path]);
     }
 
     // --- Task 1: core + guarding -------------------------------------------
@@ -1526,6 +1549,25 @@ mod tests {
         let names: Vec<_> = lib.tree().iter().map(|n| n.name.clone()).collect();
         assert_eq!(names, ["a.md", "clip.m4v", "demo.MOV", "explainer.mp4", "talk.webm"]);
         assert!(lib.walk().iter().all(|e| !e.rel.ends_with(".mp4")), "walk stays documents-only");
+    }
+
+    #[test]
+    fn walk_with_videos_adds_videos_to_the_listing() {
+        let (_d, lib) = temp_lib();
+        lib.write("Notes/a.md", "").unwrap();
+        fs::write(lib.root().join("Notes/explainer.MP4"), b"v").unwrap();
+        fs::write(lib.root().join("Notes/shot.png"), b"p").unwrap();
+        let got: Vec<(String, EntryKind)> =
+            lib.walk_with_videos().into_iter().map(|e| (e.rel, e.kind)).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("Notes/".to_string(), EntryKind::Folder),
+                ("Notes/a.md".to_string(), EntryKind::Markdown),
+                ("Notes/explainer.MP4".to_string(), EntryKind::Video),
+            ]
+        );
+        assert!(lib.walk().iter().all(|e| e.kind != EntryKind::Video), "walk stays documents-only");
     }
 
     #[test]

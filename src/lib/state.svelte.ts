@@ -65,6 +65,7 @@ import { FONT_SCALES, clampScale, stepScale } from "./zoom";
 import { applyStamps } from "./imagestamps";
 import { displayLog } from "./displaylog";
 import { changesTree, type WatchChange } from "./librarychange";
+import { rememberPosition, resumeAt } from "./videotime";
 import {
   activeTab,
   addTab,
@@ -148,6 +149,10 @@ class AppState {
   expandedDirs = new SvelteSet<string>();
   /** Local images replaced on disk this session: path → stamp (see $lib/imagestamps). */
   imageVersions = $state<Record<string, string>>({});
+  /** Where each video was left (see $lib/videotime); not reactive. */
+  #videoPositions: Record<string, number> = {};
+  /** A timestamp link waiting for its video tab to load. */
+  #videoSeek: { path: string; time: number } | null = null;
   #imageStamps = new Map<string, string>();
   currentPath = $state<string | null>(null);
   /** What changed in the open document since the reader last read it. */
@@ -340,6 +345,12 @@ class AppState {
   #autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   async init() {
+    try {
+      const v = JSON.parse(localStorage.getItem("inky.videoPositions") ?? "{}");
+      if (v && typeof v === "object" && !Array.isArray(v)) this.#videoPositions = v;
+    } catch {
+      // damaged: every video starts from the beginning
+    }
     const storedTheme = localStorage.getItem("inky.theme");
     if (storedTheme) this.themeId = storedTheme;
     try {
@@ -1543,6 +1554,34 @@ class AppState {
       if (!opts.silent) toast.error(`Could not open document: ${e}`);
       return "failed";
     }
+  }
+
+  /**
+   * Where a video starts once loaded: the moment a timestamp link asked for
+   * (and then it plays), else where it was left.
+   */
+  videoStart(path: string, duration: number): { time: number; play: boolean } {
+    const seek = this.#videoSeek;
+    if (seek?.path === path) {
+      this.#videoSeek = null;
+      return { time: seek.time, play: true };
+    }
+    return { time: resumeAt(this.#videoPositions[path], duration), play: false };
+  }
+
+  rememberVideo(path: string, time: number, duration: number) {
+    this.#videoPositions = rememberPosition(this.#videoPositions, path, time, duration);
+    try {
+      localStorage.setItem("inky.videoPositions", JSON.stringify(this.#videoPositions));
+    } catch {
+      // storage full or unavailable: the place is only kept for this session
+    }
+  }
+
+  /** Open a video in its tab, starting at `time` seconds when given. */
+  openVideo(path: string, time: number | null, background = false) {
+    this.#videoSeek = time === null ? null : { path, time };
+    return this.openInTab(path, { background });
   }
 
   /** Preview an image over the current document (the document stays open). */

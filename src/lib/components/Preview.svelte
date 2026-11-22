@@ -26,8 +26,11 @@
   import Eraser from "@lucide/svelte/icons/eraser";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import { htmlToMarkdown, spliceEdit } from "$lib/richedit";
-  import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+  import { invoke } from "@tauri-apps/api/core";
   import { toggleFullscreen } from "$lib/fullscreen";
+  import { attachVideo, swapSource } from "$lib/videoplayer";
+  import { parseVideoLink } from "$lib/videotime";
+  import { resolveFrom } from "$lib/paths";
   import { EditorView as CmEditorView, keymap as cmKeymap, drawSelection } from "@codemirror/view";
   import { StateEffect } from "@codemirror/state";
   import { history, defaultKeymap, historyKeymap, indentWithTab } from "@codemirror/commands";
@@ -112,19 +115,22 @@
       img.src = img.dataset.shownUrl = app.imageUrl(abs);
       shown.push(abs);
     }
-    if (shown.length) app.checkImages(shown);
     for (const video of root.querySelectorAll<HTMLVideoElement>(".video-embed video")) {
       const src = video.getAttribute("src") ?? "";
-      if (!src || /^(https?:|data:|blob:|asset:|\/\/)/.test(src)) continue;
+      if (!src || video.dataset.absSrc || /^(https?:|data:|blob:|asset:|\/\/)/.test(src)) continue;
       let rel = src;
       try {
         rel = decodeURI(src);
       } catch {
         // Not percent-encoded after all: use it as written.
       }
-      const abs = rel.startsWith("/") ? rel : `${dir}/${rel.replace(/^\.\//, "")}`;
+      const abs = resolveFrom(dir, rel);
       video.dataset.mdSrc = src;
-      video.src = convertFileSrc(abs);
+      video.dataset.absSrc = abs;
+      video.src = video.dataset.shownUrl = app.imageUrl(abs);
+      shown.push(abs);
+      // Only the live page plays; hover and change cards are copies.
+      if (root === container) attachVideo(video, abs);
       const embed = video.parentElement!;
       embed.dataset.name = abs.split("/").pop() ?? abs;
       if (!embed.querySelector(".video-open")) {
@@ -136,6 +142,7 @@
         video.after(open);
       }
     }
+    if (shown.length) app.checkImages(shown);
   }
 
   /** A video that can't load or play leaves a quiet box with its name. */
@@ -151,6 +158,13 @@
     for (const img of container.querySelectorAll<HTMLImageElement>("img[data-abs-src]")) {
       const url = app.imageUrl(img.dataset.absSrc!);
       if (img.dataset.shownUrl !== url) img.src = img.dataset.shownUrl = url;
+    }
+    for (const video of container.querySelectorAll<HTMLVideoElement>("video[data-abs-src]")) {
+      const url = app.imageUrl(video.dataset.absSrc!);
+      if (video.dataset.shownUrl === url) continue;
+      video.closest(".video-embed")?.classList.remove("video-missing");
+      swapSource(video, url);
+      video.dataset.shownUrl = url;
     }
   });
 
@@ -1535,6 +1549,25 @@
       import("@tauri-apps/plugin-opener").then(({ openUrl }) =>
         openUrl(href).catch(() => toast.error(`Could not open ${href}`)),
       );
+      return;
+    }
+    const videoLink = parseVideoLink(href);
+    if (videoLink && app.currentPath) {
+      const dir = app.currentPath.slice(0, app.currentPath.lastIndexOf("/"));
+      const abs = resolveFrom(dir, videoLink.path);
+      // Embedded in this document: go to it there; otherwise its own tab.
+      const embedded = container?.querySelector<HTMLVideoElement>(
+        `video[data-abs-src="${CSS.escape(abs)}"]`,
+      );
+      if (embedded && !background) {
+        embedded.scrollIntoView({ behavior: "smooth", block: "center" });
+        if (videoLink.time !== null) {
+          embedded.currentTime = videoLink.time;
+          embedded.play().catch(() => {});
+        }
+      } else {
+        app.openVideo(abs, videoLink.time, background);
+      }
       return;
     }
     if (href.startsWith("#")) {

@@ -4,6 +4,7 @@ import {
   displayDir,
   isImagePath,
   isVideoPath,
+  resolveFrom,
   isInside,
   parsePathList,
   remapPath,
@@ -56,6 +57,15 @@ describe("breadcrumbs", () => {
     expect(breadcrumbs("/Users/me/repo/docs/README.md", roots)).toEqual([
       { label: "~/repo/docs", dir: "/Users/me/repo/docs", browsable: false },
     ]);
+  });
+});
+
+describe("resolveFrom", () => {
+  it("resolves a relative path against a document's folder, . and .. included", () => {
+    expect(resolveFrom("/lib/Notes", "clip.mp4")).toBe("/lib/Notes/clip.mp4");
+    expect(resolveFrom("/lib/Notes", "./media/clip.mp4")).toBe("/lib/Notes/media/clip.mp4");
+    expect(resolveFrom("/lib/Notes/Deep", "../../videos/clip.mp4")).toBe("/lib/videos/clip.mp4");
+    expect(resolveFrom("/lib/Notes", "/abs/clip.mp4")).toBe("/abs/clip.mp4");
   });
 });
 

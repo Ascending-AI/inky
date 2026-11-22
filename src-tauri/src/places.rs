@@ -3,7 +3,7 @@
 //! Both are sidecar-less `Library` handles, so `Library::resolve` keeps doing
 //! all the confinement. Grants are only ever created from Rust code paths.
 
-use crate::library::{is_doc, Library};
+use crate::library::{is_doc, is_video, Library};
 use crate::opens::OpenRequest;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -121,6 +121,12 @@ impl Places {
         if path.is_dir() {
             let root = self.set_workspace(path).ok()?;
             return Some(OpenRequest::Folder { path: root.to_string_lossy().into_owned() });
+        }
+        if is_video(path) {
+            // Played from where it is: only videos a place already reaches.
+            let canon = path.canonicalize().ok()?.to_string_lossy().into_owned();
+            self.find(library, &canon).ok()?;
+            return Some(OpenRequest::File { path: canon });
         }
         if !is_doc(path) {
             return None;
@@ -586,6 +592,20 @@ mod tests {
         places.set_workspace(&home.join("Library/ws")).unwrap();
         let a = s(&home.join("Library/ws/a.md"));
         assert!(places.follow_link_from(&f.library, &a, "b.md", Some(&home)).unwrap().doc);
+    }
+
+    #[test]
+    fn open_path_opens_reachable_videos_only() {
+        let f = fixture();
+        let mut places = Places::default();
+        let inside = f.library.root().join("clip.mp4");
+        fs::write(&inside, b"v").unwrap();
+        let req = places.open_path(&f.library, &inside);
+        let canon = s(&inside.canonicalize().unwrap());
+        assert_eq!(req, Some(OpenRequest::File { path: canon }));
+        let outside = f.outside.join("clip.mp4");
+        fs::write(&outside, b"v").unwrap();
+        assert_eq!(places.open_path(&f.library, &outside), None, "videos are never granted");
     }
 
     #[test]
