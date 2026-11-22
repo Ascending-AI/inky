@@ -10,7 +10,8 @@
   import FileText from "@lucide/svelte/icons/file-text";
   import Workflow from "@lucide/svelte/icons/workflow";
   import ImageIcon from "@lucide/svelte/icons/image";
-  import { isImagePath } from "$lib/paths";
+  import Film from "@lucide/svelte/icons/film";
+  import { isImagePath, isVideoPath } from "$lib/paths";
   import TreeItem from "./TreeItem.svelte";
 
   interface Props {
@@ -30,6 +31,7 @@
     app.imagePath ? app.imagePath === node.path : app.currentPath === node.path,
   );
   const isMermaid = $derived(node.name.toLowerCase().endsWith(".mmd"));
+  const isVideo = $derived(!node.isDir && isVideoPath(node.path));
 
   const DRAG_TYPE = "application/x-inky-path";
 
@@ -106,6 +108,8 @@
           <Folder class="size-4 shrink-0 opacity-70" />
         {:else if isImage}
           <ImageIcon class="ml-[18px] size-4 shrink-0 opacity-70" />
+        {:else if isVideo}
+          <Film class="ml-[18px] size-4 shrink-0 opacity-70" />
         {:else if isMermaid}
           <Workflow class="ml-[18px] size-4 shrink-0 opacity-70" />
         {:else}

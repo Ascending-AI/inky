@@ -10,6 +10,7 @@
     "frontendDist": "../build"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "Inky",
@@ -48,6 +49,10 @@
           "$HOME/**/*.[wW][eE][bB][pP]",
           "$HOME/**/*.[sS][vV][gG]",
           "$HOME/**/*.[aA][vV][iI][fF]",
+          "$HOME/**/*.[mM][pP]4",
+          "$HOME/**/*.[mM][oO][vV]",
+          "$HOME/**/*.[mM]4[vV]",
+          "$HOME/**/*.[wW][eE][bB][mM]",
           "$HOME/**/*.[bB][mM][pP]",
           "$HOME/**/*.[hH][eE][iI][cC]"
         ]

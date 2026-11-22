@@ -116,9 +116,43 @@ describe("rich edit round-trip", () => {
       htmlToMarkdown('<p><img src="asset://x" data-md-src="assets/a.png" alt="pic"></p>'),
     ).toBe("![pic](assets/a.png)");
   });
+
+  it("writes embedded videos back as image syntax", () => {
+    const html =
+      '<p><span class="video-embed"><video src="asset://x" data-md-src="images/e.mp4" controls></video>' +
+      '<button class="video-open">Open in tab</button><span class="video-caption">What we found</span></span></p>';
+    expect(htmlToMarkdown(html)).toBe("![What we found](images/e.mp4)");
+  });
 });
 
 describe("renderMarkdown", () => {
+  it("renders videos written as images as players with a caption", () => {
+    const box = document.createElement("div");
+    box.innerHTML = renderMarkdown('Intro ![What "we" found <b>](images/explainer.MP4)');
+    const video = box.querySelector("p span.video-embed video");
+    expect(video?.getAttribute("src")).toBe("images/explainer.MP4");
+    expect(video?.hasAttribute("controls")).toBe(true);
+    expect(video?.getAttribute("preload")).toBe("metadata");
+    expect(box.querySelector(".video-caption")?.textContent).toBe('What "we" found <b>');
+    expect(box.querySelector("img, b")).toBeNull();
+  });
+
+  it("gives a video without alt text no caption, and keeps images as images", () => {
+    const box = document.createElement("div");
+    box.innerHTML = renderMarkdown("![](clip.webm) ![pic](shot.png)");
+    expect(box.querySelector("video")?.getAttribute("src")).toBe("clip.webm");
+    expect(box.querySelector(".video-caption")).toBeNull();
+    expect(box.querySelector("img")?.getAttribute("src")).toBe("shot.png");
+  });
+
+  it("blocks remote videos like remote images", () => {
+    const box = document.createElement("div");
+    box.innerHTML = renderMarkdown("![talk](https://example.com/t.mp4)");
+    const video = box.querySelector("video")!;
+    expect(video.hasAttribute("src")).toBe(false);
+    expect(video.getAttribute("data-remote-src")).toBe("https://example.com/t.mp4");
+  });
+
   it("renders mermaid fences as placeholders, not code blocks", () => {
     const html = renderMarkdown("```mermaid\nflowchart LR\nA-->B\n```\n");
     expect(html).toContain("data-mermaid=");

@@ -73,6 +73,18 @@ turndown.addRule("inky-images", {
   },
 });
 
+// Embedded videos (see $lib/markdown) go back to the image syntax they came from.
+turndown.addRule("inky-videos", {
+  filter: (node) => node.nodeName === "SPAN" && node.classList.contains("video-embed"),
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const video = el.querySelector("video");
+    const src = video?.getAttribute("data-md-src") ?? video?.getAttribute("src") ?? "";
+    const alt = el.querySelector(".video-caption")?.textContent ?? "";
+    return `![${alt}](${src})`;
+  },
+});
+
 export function htmlToMarkdown(html: string): string {
   return (
     turndown

@@ -51,6 +51,13 @@ export function isImagePath(path: string): boolean {
   return IMAGE_RE.test(path);
 }
 
+/** Videos the sidebar lists and plays in a tab (mirrors `VIDEO_EXTENSIONS` in library.rs). */
+const VIDEO_RE = /\.(mp4|mov|m4v|webm)$/i;
+
+export function isVideoPath(path: string): boolean {
+  return VIDEO_RE.test(path);
+}
+
 /** `path` after `from` was renamed or moved to `to` (unchanged if unaffected). */
 export function remapPath(path: string, from: string, to: string): string {
   if (path === from) return to;

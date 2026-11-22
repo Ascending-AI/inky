@@ -389,6 +389,70 @@
   font-size: 0.8em;
   vertical-align: middle;
 }
+/* An embedded video (see $lib/markdown): as wide as the text, caption below,
+   "Open in tab" over its top-right corner on hover. */
+.prose-doc .video-embed {
+  position: relative;
+  display: block;
+  margin: 1.4em 0;
+}
+.prose-doc .video-embed video {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  border-radius: 8px;
+  background: #000;
+}
+.prose-doc .video-caption {
+  display: block;
+  margin-top: 0.5em;
+  color: var(--muted-foreground);
+  font-size: 0.85em;
+  text-align: center;
+}
+.prose-doc .video-open {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.6);
+  color: #fff;
+  font-size: 0.75rem;
+  opacity: 0;
+  transition: opacity 120ms;
+  cursor: pointer;
+}
+.prose-doc .video-embed:hover .video-open,
+.prose-doc .video-open:focus-visible {
+  opacity: 1;
+}
+.prose-doc .video-embed.video-missing video,
+.prose-doc .video-embed.video-missing .video-open {
+  display: none;
+}
+.prose-doc .video-embed.video-missing::before {
+  content: "Can\2019t play " attr(data-name);
+  display: block;
+  padding: 0.75rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted-foreground);
+  font-size: 0.85em;
+  text-align: center;
+}
+@media print {
+  .prose-doc .video-open {
+    display: none;
+  }
+  .prose-doc .video-embed::after {
+    content: attr(data-name);
+    display: block;
+    color: var(--muted-foreground);
+    font-size: 0.75em;
+    text-align: center;
+  }
+}
 .prose-doc .mermaid-block {
   margin: 1.4em 0;
   display: flex;

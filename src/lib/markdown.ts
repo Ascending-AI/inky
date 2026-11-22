@@ -183,8 +183,17 @@ export function extractBlocks(src: string): SourceBlock[] {
   return merged.map((s) => ({ start: offsets[s.startLine], end: lineEnd(s.endLine) }));
 }
 
+/** Videos written with image syntax play in place (mirrors isVideoPath in $lib/paths). */
+const VIDEO_HREF = /\.(mp4|mov|m4v|webm)(?:[?#].*)?$/i;
+
 marked.use({
   renderer: {
+    image({ href, text }) {
+      if (!VIDEO_HREF.test(href)) return false;
+      // A <span> wrapper: the embed sits inside the paragraph marked makes.
+      const caption = text ? `<span class="video-caption">${escapeAttr(text)}</span>` : "";
+      return `<span class="video-embed"><video src="${escapeAttr(href)}" controls preload="metadata"></video>${caption}</span>`;
+    },
     heading({ tokens, depth, text }) {
       const id = slugify(text);
       return `<h${depth} id="${id}">${this.parser.parseInline(tokens)}</h${depth}>\n`;

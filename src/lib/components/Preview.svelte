@@ -26,7 +26,8 @@
   import Eraser from "@lucide/svelte/icons/eraser";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import { htmlToMarkdown, spliceEdit } from "$lib/richedit";
-  import { invoke } from "@tauri-apps/api/core";
+  import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+  import { toggleFullscreen } from "$lib/fullscreen";
   import { EditorView as CmEditorView, keymap as cmKeymap, drawSelection } from "@codemirror/view";
   import { StateEffect } from "@codemirror/state";
   import { history, defaultKeymap, historyKeymap, indentWithTab } from "@codemirror/commands";
@@ -112,6 +113,35 @@
       shown.push(abs);
     }
     if (shown.length) app.checkImages(shown);
+    for (const video of root.querySelectorAll<HTMLVideoElement>(".video-embed video")) {
+      const src = video.getAttribute("src") ?? "";
+      if (!src || /^(https?:|data:|blob:|asset:|\/\/)/.test(src)) continue;
+      let rel = src;
+      try {
+        rel = decodeURI(src);
+      } catch {
+        // Not percent-encoded after all: use it as written.
+      }
+      const abs = rel.startsWith("/") ? rel : `${dir}/${rel.replace(/^\.\//, "")}`;
+      video.dataset.mdSrc = src;
+      video.src = convertFileSrc(abs);
+      const embed = video.parentElement!;
+      embed.dataset.name = abs.split("/").pop() ?? abs;
+      if (!embed.querySelector(".video-open")) {
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "video-open";
+        open.dataset.path = abs;
+        open.textContent = "Open in tab";
+        video.after(open);
+      }
+    }
+  }
+
+  /** A video that can't load or play leaves a quiet box with its name. */
+  function onMediaError(event: Event) {
+    const video = event.target as HTMLElement;
+    if (video.tagName === "VIDEO") video.closest(".video-embed")?.classList.add("video-missing");
   }
 
   // A picture replaced on disk gets a new version: reload it where it shows.
@@ -1414,6 +1444,11 @@
   }
 
   function handleClick(event: MouseEvent) {
+    const openVideo = (event.target as HTMLElement).closest<HTMLElement>(".video-open");
+    if (openVideo?.dataset.path) {
+      app.openInTab(openVideo.dataset.path, { background: event.metaKey });
+      return;
+    }
     const chg = (event.target as HTMLElement).closest<HTMLElement>(CHANGE_SELECTOR);
     if (chg && event.clientX < chg.getBoundingClientRect().left) {
       showChangeCard(chg);
@@ -1461,7 +1496,11 @@
    *  single click never edits, so reading can't change a document. */
   function handleDblClick(event: MouseEvent) {
     const target = event.target as HTMLElement;
-    if (target.closest("mark.hl, mark.comment-hl, a, img, .mermaid-block, .link-preview, .highlight-popover"))
+    if (target.tagName === "VIDEO" && target.closest(".video-embed")) {
+      toggleFullscreen(target);
+      return;
+    }
+    if (target.closest("mark.hl, mark.comment-hl, a, img, .video-embed, .mermaid-block, .link-preview, .highlight-popover"))
       return;
     selAction = null;
     // The double-click selected a word; edit from a caret instead.
@@ -1536,6 +1575,7 @@
   class="print-scroll relative h-full cursor-text overflow-y-auto px-8 py-10"
   onclick={handleClick}
   ondblclick={handleDblClick}
+  onerrorcapture={onMediaError}
   onscroll={onScroll}
   onmouseup={onMouseUp}
   onmouseover={onHover}

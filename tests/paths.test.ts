@@ -3,6 +3,7 @@ import {
   breadcrumbs,
   displayDir,
   isImagePath,
+  isVideoPath,
   isInside,
   parsePathList,
   remapPath,
@@ -55,6 +56,18 @@ describe("breadcrumbs", () => {
     expect(breadcrumbs("/Users/me/repo/docs/README.md", roots)).toEqual([
       { label: "~/repo/docs", dir: "/Users/me/repo/docs", browsable: false },
     ]);
+  });
+});
+
+describe("isVideoPath", () => {
+  it("matches the video formats macOS plays, in any case", () => {
+    expect(isVideoPath("/a/explainer.mp4")).toBe(true);
+    expect(isVideoPath("/a/demo.MOV")).toBe(true);
+    expect(isVideoPath("/a/clip.m4v")).toBe(true);
+    expect(isVideoPath("/a/talk.webm")).toBe(true);
+    expect(isVideoPath("/a/raw.avi")).toBe(false);
+    expect(isVideoPath("/a/mp4.md")).toBe(false);
+    expect(isVideoPath("/a/shot.png")).toBe(false);
   });
 });
 

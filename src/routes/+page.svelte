@@ -25,6 +25,7 @@
   import McpSetupDialog from "$lib/components/McpSetupDialog.svelte";
   import ThemeEditor from "$lib/components/ThemeEditor.svelte";
   import ImagePreview from "$lib/components/ImagePreview.svelte";
+  import VideoView from "$lib/components/VideoView.svelte";
   import ZoomViewer from "$lib/components/ZoomViewer.svelte";
   import * as Resizable from "$lib/components/ui/resizable/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -333,6 +334,10 @@
             </Button>
           </div>
         </div>
+      {:else if app.isVideoTab}
+        {#key app.currentPath}
+          <VideoView path={app.currentPath} />
+        {/key}
       {:else if app.viewMode === "split"}
         <Resizable.PaneGroup direction="horizontal" autoSaveId="inky-split">
           <Resizable.Pane defaultSize={50} minSize={25} class="no-print">
@@ -380,7 +385,7 @@
       </div>
     {/if}
 
-    {#if ready && app.currentPath && app.tocVisible && !app.isMermaidDoc}
+    {#if ready && app.currentPath && app.tocVisible && !app.isMermaidDoc && !app.isVideoTab}
       <div
         class="no-print relative shrink-0"
         style="width: {tocWidth}px"

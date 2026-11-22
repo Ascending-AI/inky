@@ -42,8 +42,9 @@
   import Folder from "@lucide/svelte/icons/folder";
   import FileText from "@lucide/svelte/icons/file-text";
   import type { TreeNode, ViewMode } from "$lib/types";
-  import { breadcrumbs, isImagePath, type Crumb } from "$lib/paths";
+  import { breadcrumbs, isImagePath, isVideoPath, type Crumb } from "$lib/paths";
   import ImageIcon from "@lucide/svelte/icons/image";
+  import Film from "@lucide/svelte/icons/film";
 
   /** Folder trail to the open document; each folder lists its contents. */
   const crumbs = $derived(
@@ -139,7 +140,11 @@
           app.openInTab(node.path, { background: true });
         }}
       >
-        <FileText class="size-4 opacity-60" />
+        {#if isVideoPath(node.path)}
+          <Film class="size-4 opacity-60" />
+        {:else}
+          <FileText class="size-4 opacity-60" />
+        {/if}
         <span class="truncate">{node.name.replace(/\.(md|markdown|mmd)$/i, "")}</span>
       </DropdownMenu.Item>
     {/if}
@@ -256,7 +261,7 @@
       {#if app.dirty}
         <span class="size-1.5 shrink-0 rounded-full bg-muted-foreground" title="Unsaved changes"></span>
       {/if}
-      {#if app.currentPath && !app.isMermaidDoc}
+      {#if app.currentPath && !app.isMermaidDoc && !app.isVideoTab}
         <span class="ml-1 shrink-0 text-xs text-muted-foreground/80 tabular-nums">
           {app.wordCount.toLocaleString()} words · {app.readingMinutes} min
         </span>
@@ -277,6 +282,7 @@
                 class="size-7 {app.viewMode === mode
                   ? 'bg-background shadow-sm hover:bg-background'
                   : 'hover:bg-transparent opacity-60'}"
+                disabled={app.isVideoTab}
                 onclick={() => app.setViewMode(mode)}
               >
                 <Icon class="size-4" />
@@ -296,7 +302,7 @@
             variant="ghost"
             size="icon"
             class="ml-1 {app.tocVisible ? 'bg-accent' : ''}"
-            disabled={!app.currentPath || app.isMermaidDoc}
+            disabled={!app.currentPath || app.isMermaidDoc || app.isVideoTab}
             onclick={() => app.toggleToc()}
           >
             <TableOfContents class="size-4" />

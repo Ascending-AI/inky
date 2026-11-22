@@ -27,7 +27,7 @@ import {
 } from "./themes/library";
 import { WELCOME_DOC, MERMAID_TEMPLATE } from "./templates";
 import { extractToc, type TocEntry } from "./markdown";
-import { isImagePath, isInside, parsePathList, remapPath } from "./paths";
+import { isImagePath, isInside, isVideoPath, parsePathList, remapPath } from "./paths";
 import { SvelteSet } from "svelte/reactivity";
 import { capturePosition, forgetPositions, remapPositions, targetScrollTop } from "./readpos";
 import { baselineAfterEdit, diffBlocks, merge3, type ChangeSet, type MergeConflict } from "./changes";
@@ -296,6 +296,8 @@ class AppState {
   docName = $derived(this.currentPath?.split("/").pop() ?? "");
   /** .mmd files are standalone mermaid diagrams. */
   isMermaidDoc = $derived(this.docName.toLowerCase().endsWith(".mmd"));
+  /** The active tab plays a video from the library instead of showing a document. */
+  isVideoTab = $derived(this.currentPath !== null && isVideoPath(this.currentPath));
   toc = $derived<TocEntry[]>(
     this.currentPath && !this.isMermaidDoc ? extractToc(this.content) : [],
   );
@@ -311,7 +313,7 @@ class AppState {
       for (const n of nodes) {
         if (n.hidden) continue;
         if (n.isDir) walk(n.children);
-        else if (!isImagePath(n.path))
+        else if (!isImagePath(n.path) && !isVideoPath(n.path))
           out.push({ name: n.name, path: n.path, rel: n.path.slice(prefix) });
       }
     };
@@ -1398,7 +1400,7 @@ class AppState {
     if (path && this.#editingInPlace) {
       // Swapping the text under an open in-place edit would misplace it.
       this.#diskCheckPending = true;
-    } else if (path && !this.conflict) {
+    } else if (path && !this.conflict && !this.isVideoTab) {
       try {
         const disk = await invoke<string>("read_doc", { path });
         if (disk !== this.savedContent) await this.#takeDiskChange(path, disk);
@@ -1416,7 +1418,7 @@ class AppState {
 
   /** Refresh threads from the sidecar without touching draft/selection state. */
   async reloadCommentsFromDisk() {
-    if (!this.currentPath) return;
+    if (!this.currentPath || this.isVideoTab) return;
     try {
       const raw = await invoke<string>("read_comments", { docPath: this.currentPath });
       const threads: CommentThread[] = raw ? (JSON.parse(raw).threads ?? []) : [];
@@ -1475,7 +1477,14 @@ class AppState {
     if (!left) return "blocked";
     const leaving = this.#here();
     try {
-      const text = await invoke<string>("read_doc", { path });
+      const video = isVideoPath(path);
+      // A video tab has no text: it only needs the file to be there.
+      const text = video
+        ? await invoke<boolean>("path_exists", { path }).then((ok) => {
+            if (!ok) throw new Error("the file is missing");
+            return "";
+          })
+        : await invoke<string>("read_doc", { path });
       // A later load took over while this one read: it owns the tab now.
       if (superseded()) return "superseded";
       if (!opts.fromTab && opts.restoreScroll === undefined && leaving && leaving.path !== path) {
@@ -1502,6 +1511,15 @@ class AppState {
       tab.path = path;
       tab.nav = this.nav;
       this.#persistTabs();
+      if (video) {
+        this.changes = null;
+        this.docSidecars = false;
+        this.commentsVisible = false;
+        this.historyVisible = false;
+        await this.loadComments();
+        this.#showTitle();
+        return "loaded";
+      }
       await this.#loadChanges(path, text);
       this.#showTitle();
       const sidecars = await invoke<boolean>("doc_sidecars", { path }).catch(() => false);

@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 pub const DOC_EXTENSIONS: [&str; 3] = ["md", "markdown", "mmd"];
 /// Images listed in the sidebar tree (previewed, not edited).
 pub const IMAGE_EXTENSIONS: [&str; 9] = ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "heic"];
+/// Videos the webview plays without extra software (mirrors `VIDEO_RE` in paths.ts).
+pub const VIDEO_EXTENSIONS: [&str; 4] = ["mp4", "mov", "m4v", "webm"];
 pub const APP_IDENTIFIER: &str = "com.inky.app";
 pub const HISTORY_DIR: &str = ".inky-history";
 pub const SNAPSHOT_MIN_INTERVAL_SECS: u64 = 10 * 60;
@@ -52,6 +54,13 @@ pub fn is_image(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .map(|e| IMAGE_EXTENSIONS.contains(&e.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+pub fn is_video(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| VIDEO_EXTENSIONS.contains(&e.to_lowercase().as_str()))
         .unwrap_or(false)
 }
 
@@ -112,7 +121,7 @@ pub fn is_watch_relevant(root: &Path, path: &Path) -> bool {
     }
     // A path that no longer exists and has no extension was most likely a folder.
     let folder = path.is_dir() || (!path.exists() && path.extension().is_none());
-    (is_doc(path) || is_image(path) || folder) && !is_skipped_path(rel) && !ignores::is_hidden(root, path)
+    (is_doc(path) || is_image(path) || is_video(path) || folder) && !is_skipped_path(rel) && !ignores::is_hidden(root, path)
 }
 
 /// One changed path the frontend should hear about. A document that still
@@ -314,7 +323,7 @@ fn build_tree(dir: &Path, opts: TreeOpts, rules: &Ignores, in_hidden: bool) -> V
                 children,
                 hidden,
             });
-        } else if is_doc(&path) || is_image(&path) {
+        } else if is_doc(&path) || is_image(&path) || is_video(&path) {
             nodes.push(Node {
                 name,
                 path: path.to_string_lossy().into_owned(),
@@ -1351,6 +1360,8 @@ mod tests {
         assert!(!r(".git/.a.md.comments.json"));
         assert!(!r("real/notes.txt"));
         assert!(r("real/photo.PNG"), "images show in the tree");
+        assert!(r("real/explainer.MP4"), "videos show in the tree");
+        assert!(!r("node_modules/clip.mov"));
     }
 
     #[test]
@@ -1503,6 +1514,18 @@ mod tests {
         let names: Vec<_> = lib.tree().iter().map(|n| n.name.clone()).collect();
         assert_eq!(names, ["assets", "a.md", "shot.png"]);
         assert!(lib.walk().iter().all(|e| !e.rel.ends_with(".png")), "walk stays documents-only");
+    }
+
+    #[test]
+    fn tree_lists_videos() {
+        let (_d, lib) = temp_lib();
+        lib.write("a.md", "").unwrap();
+        for name in ["explainer.mp4", "demo.MOV", "clip.m4v", "talk.webm", "raw.avi"] {
+            fs::write(lib.root().join(name), b"video").unwrap();
+        }
+        let names: Vec<_> = lib.tree().iter().map(|n| n.name.clone()).collect();
+        assert_eq!(names, ["a.md", "clip.m4v", "demo.MOV", "explainer.mp4", "talk.webm"]);
+        assert!(lib.walk().iter().all(|e| !e.rel.ends_with(".mp4")), "walk stays documents-only");
     }
 
     #[test]
