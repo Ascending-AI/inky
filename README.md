@@ -46,7 +46,8 @@ Inky checks for updates on launch and from **Inky → Check for Updates…**.
 - **Images** in the library appear in the sidebar and open in a viewer.
 - **Videos** (MP4, MOV, M4V, WebM) appear in the sidebar and play in their
   own tab. `![caption](clip.mp4)` plays one inside a document; double-click a
-  video, or use its controls, for full screen.
+  video, or use its controls, for full screen. Space plays and pauses; ← / →
+  move back or ahead 5 seconds.
 - **`.inkyignore`** hides clutter from the sidebar, search and agents. It
   uses `.gitignore` syntax. **Hide from Inky** in an item's menu writes the
   rule for you, and the sidebar's eye button shows hidden items.

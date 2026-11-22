@@ -29,6 +29,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { toggleFullscreen } from "$lib/fullscreen";
   import { attachVideo, swapSource } from "$lib/videoplayer";
+  import { isPlayKey, seekBy, seekStep, togglePlay } from "$lib/videokeys";
   import { parseVideoLink } from "$lib/videotime";
   import { resolveFrom } from "$lib/paths";
   import { EditorView as CmEditorView, keymap as cmKeymap, drawSelection } from "@codemirror/view";
@@ -818,6 +819,41 @@
   }
 
   /** Reading-pane keys: highlighting, closing popovers and edit sessions. */
+  /** The embedded video last started, to pause and resume with Space. */
+  let lastPlayed: HTMLVideoElement | null = null;
+
+  /**
+   * The embedded video being watched: one that is playing, else the one last
+   * played while it is still on screen, else a focused one. None means the
+   * keys keep their usual jobs (Space scrolls).
+   */
+  function watchedVideo(): HTMLVideoElement | null {
+    if (!container || !scroller) return null;
+    const videos = [...container.querySelectorAll<HTMLVideoElement>("video[data-abs-src]")];
+    const playing = videos.find((v) => !v.paused && !v.ended);
+    if (playing) return playing;
+    if (lastPlayed && videos.includes(lastPlayed)) {
+      const r = lastPlayed.getBoundingClientRect();
+      const view = scroller.getBoundingClientRect();
+      if (r.bottom > view.top && r.top < view.bottom) return lastPlayed;
+    }
+    return videos.find((v) => v === document.activeElement) ?? null;
+  }
+
+  /** Space plays or pauses the watched video, ← / → move it 5 seconds. */
+  function onVideoKeys(e: KeyboardEvent) {
+    if (app.viewerOpen) return;
+    const step = seekStep(e);
+    if (step === null && !isPlayKey(e)) return;
+    const video = watchedVideo();
+    if (!video) return;
+    // Captured: act once, before a focused player's own controls see it.
+    e.preventDefault();
+    e.stopPropagation();
+    if (step === null) togglePlay(video);
+    else seekBy(video, step);
+  }
+
   function onGlobalKeydown(e: KeyboardEvent) {
     if (e.key === "Escape" && hlPop) {
       hlPop = null;
@@ -1599,7 +1635,7 @@
   }
 </script>
 
-<svelte:window onkeydown={onGlobalKeydown} />
+<svelte:window onkeydown={onGlobalKeydown} onkeydowncapture={onVideoKeys} />
 
 <div class="print-root relative h-full">
 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_mouse_events_have_key_events -->
@@ -1609,6 +1645,9 @@
   onclick={handleClick}
   ondblclick={handleDblClick}
   onerrorcapture={onMediaError}
+  onplaycapture={(e) => {
+    if ((e.target as HTMLElement).tagName === "VIDEO") lastPlayed = e.target as HTMLVideoElement;
+  }}
   onscroll={onScroll}
   onmouseup={onMouseUp}
   onmouseover={onHover}
