@@ -1179,7 +1179,7 @@ mod tests {
         let legacy = dir.join("h.2026-01-01-00-00-00.md");
         fs::write(&legacy, "legacy").unwrap();
         let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
-        fs::File::open(&legacy).unwrap().set_modified(old).unwrap();
+        fs::OpenOptions::new().write(true).open(&legacy).unwrap().set_modified(old).unwrap();
         lib.write("h.md", "v2").unwrap(); // snapshots v1 (legacy is older than 10 min)
         lib.write("h.md", "v3").unwrap(); // must NOT snapshot: the newest is seconds old
         let mut names: Vec<String> = fs::read_dir(&dir)
@@ -1268,7 +1268,7 @@ mod tests {
         std::env::set_var("INKY_LIBRARY", dir.path());
         let lib = Library::from_env().unwrap();
         std::env::remove_var("INKY_LIBRARY");
-        assert_eq!(lib.root(), dir.path().canonicalize().unwrap());
+        assert_eq!(lib.root(), canonical(dir.path()).unwrap());
     }
 
     // --- sidecar-less handles (outside documents) ---------------------------

@@ -915,7 +915,7 @@ mod tests {
         let (f, changes) = fixture_recording_changes().await;
         f.lib.write("Notes/a.md", "x").unwrap();
         let root = f.lib.root().to_path_buf();
-        let s = |p: &str| root.join(p).to_string_lossy().into_owned();
+        let s = |p: &str| crate::library::path_text(&root.join(p));
         let (err, msg) = call(&f, "rename_document", serde_json::json!({"path": "Notes/a.md", "new_name": "b.md"})).await;
         assert!(!err, "{msg}");
         let (err, msg) = call(&f, "move_document", serde_json::json!({"path": "Notes/b.md", "target_folder": "Archive"})).await;

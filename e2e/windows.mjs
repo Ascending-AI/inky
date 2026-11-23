@@ -7,7 +7,7 @@
 //
 // Needs tauri-driver and a matching msedgedriver on PATH. No npm packages:
 // the W3C WebDriver protocol is a handful of HTTP calls.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -32,6 +32,18 @@ const configDir = path.join(process.env.APPDATA ?? path.join(os.homedir(), "AppD
 fs.mkdirSync(configDir, { recursive: true });
 fs.writeFileSync(path.join(configDir, "config.json"), JSON.stringify({ library }));
 console.log(`library: ${library}`);
+
+// An Inky that is already running would take the session's launch and the new
+// one would quit (single instance): say so, and stop it.
+const others = spawnSync(
+  "powershell",
+  ["-NoProfile", "-Command", "Get-CimInstance Win32_Process -Filter \"Name='Inky.exe'\" | ForEach-Object { \"$($_.ProcessId) $($_.CommandLine)\" }"],
+  { encoding: "utf8" },
+).stdout?.trim();
+if (others) {
+  console.log(`! stopping Inky processes that were already running:\n${others}`);
+  spawnSync("taskkill", ["/IM", "Inky.exe", "/F"], { stdio: "inherit" });
+}
 
 // --- WebDriver -------------------------------------------------------------
 

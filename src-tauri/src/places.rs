@@ -269,7 +269,7 @@ mod tests {
         let lib_dir = tempdir();
         let out_dir = tempdir();
         let library = Library::open(lib_dir.path()).unwrap();
-        let outside = out_dir.path().canonicalize().unwrap();
+        let outside = canonical(out_dir.path()).unwrap();
         fs::write(outside.join("a.md"), "A").unwrap();
         fs::write(outside.join("b.md"), "B").unwrap();
         fs::write(outside.join("notes.txt"), "T").unwrap();
@@ -598,7 +598,7 @@ mod tests {
         let inside = f.library.root().join("clip.mp4");
         fs::write(&inside, b"v").unwrap();
         let req = places.open_path(&f.library, &inside);
-        let canon = s(&inside.canonicalize().unwrap());
+        let canon = s(&canonical(&inside).unwrap());
         assert_eq!(req, Some(OpenRequest::File { path: canon }));
         let outside = f.outside.join("clip.mp4");
         fs::write(&outside, b"v").unwrap();

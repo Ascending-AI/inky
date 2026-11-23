@@ -18,6 +18,20 @@ const fail = (msg) => {
   process.exit(1);
 };
 const ok = (msg) => console.log(`✓ ${msg}`);
+
+/** Every running Inky.exe with its command line (empty when none). */
+function running() {
+  const r = spawnSync(
+    "powershell",
+    [
+      "-NoProfile",
+      "-Command",
+      "Get-CimInstance Win32_Process -Filter \"Name='Inky.exe'\" | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId) $($_.CommandLine)\" }",
+    ],
+    { encoding: "utf8" },
+  );
+  return (r.stdout ?? "").trim();
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const installer = process.argv[2];
@@ -30,6 +44,8 @@ if (install.status !== 0) fail(`the installer exited with ${install.status ?? in
 const candidates = [path.join(local, "Inky", "Inky.exe"), path.join(local, "Programs", "Inky", "Inky.exe")];
 const exe = candidates.find((p) => fs.existsSync(p)) ?? fail(`Inky.exe is in none of ${candidates.join(", ")}`);
 ok(`installed: ${exe}`);
+const afterInstall = running();
+if (afterInstall) console.log(`! Inky is running after the install (pid, parent, command):\n${afterInstall}`);
 
 // A library of our own, so nothing depends on the runner's Documents folder.
 const library = fs.mkdtempSync(path.join(os.tmpdir(), "inky-smoke-"));
@@ -97,22 +113,31 @@ ok("MCP over stdio: write, read and list a document");
 // records the page load and the page's own first line, which comes through IPC.
 const logs = [path.join(local, "com.inky.app", "logs", "display.log"), path.join(local, "com.inky.app", "display.log")];
 for (const f of logs) fs.rmSync(f, { force: true });
-const app = spawn(exe, [smokeDoc], { env, stdio: "ignore" });
+// Another Inky would take the document and this one would quit (single instance).
+const before = running();
+if (before) fail(`Inky is already running before the app test (pid, parent, command):\n${before}`);
+const app = spawn(exe, [smokeDoc], { env, stdio: ["ignore", "pipe", "pipe"] });
+let output = "";
+app.stdout.on("data", (d) => (output += d));
+app.stderr.on("data", (d) => (output += d));
 let exited = null;
 app.on("exit", (code) => (exited = code));
+const readLog = () => logs.map((f) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "")).join("");
+const why = () =>
+  `\n--- display log ---\n${readLog() || "(none)"}\n--- output ---\n${output || "(none)"}\n--- running Inky ---\n${running() || "(none)"}`;
 const want = ["app start", "page load finished", "page: page start"];
 let log = "";
 for (let waited = 0; waited < 90_000; waited += 1000) {
   await sleep(1000);
-  if (exited !== null) fail(`Inky exited with ${exited} while starting`);
-  log = logs.map((f) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "")).join("");
+  if (exited !== null) fail(`Inky exited with ${exited} while starting${why()}`);
+  log = readLog();
   if (want.every((w) => log.includes(w))) break;
 }
 const missing = want.filter((w) => !log.includes(w));
-if (missing.length) fail(`the display log lacks ${missing.join(", ")}:\n${log || "(no log)"}`);
+if (missing.length) fail(`the display log lacks ${missing.join(", ")}${why()}`);
 // Still up a few seconds later: no crash after the first paint.
 await sleep(5000);
-if (exited !== null) fail(`Inky exited with ${exited} after loading`);
+if (exited !== null) fail(`Inky exited with ${exited} after loading${why()}`);
 app.kill();
 ok("the app starts, loads its page and runs it");
 console.log(log.trim());
