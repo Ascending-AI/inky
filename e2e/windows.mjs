@@ -42,7 +42,7 @@ const others = spawnSync(
 ).stdout?.trim();
 if (others) {
   console.log(`! stopping Inky processes that were already running:\n${others}`);
-  spawnSync("taskkill", ["/IM", "Inky.exe", "/F"], { stdio: "inherit" });
+  spawnSync("taskkill", ["/IM", "Inky.exe", "/F", "/T"], { stdio: "inherit" });
 }
 
 // --- WebDriver -------------------------------------------------------------
@@ -148,7 +148,9 @@ try {
     }
   }
   const created = await wd("POST", "/session", {
-    capabilities: { alwaysMatch: { "tauri:options": { application: exe } } },
+    // webviewOptions puts msedgedriver in WebView2 mode; without it, it starts
+    // the app as if it were Edge and waits for a debug port that never opens.
+    capabilities: { alwaysMatch: { "tauri:options": { application: exe, webviewOptions: {} } } },
   });
   session = created.sessionId;
 

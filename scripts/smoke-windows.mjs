@@ -53,7 +53,8 @@ for (let waited = 0; waited < 30_000 && !started; waited += 500) {
 }
 if (started) {
   ok("the installer starts Inky");
-  spawnSync("taskkill", ["/IM", "Inky.exe", "/F"], { stdio: "ignore" });
+  // /T: its WebView2 processes too, so the next launch starts a fresh browser.
+  spawnSync("taskkill", ["/IM", "Inky.exe", "/F", "/T"], { stdio: "ignore" });
   for (let waited = 0; waited < 10_000 && running(); waited += 500) await sleep(500);
 } else {
   console.log("! the installer did not start Inky");
@@ -150,6 +151,6 @@ if (missing.length) fail(`the display log lacks ${missing.join(", ")}${why()}`);
 // Still up a few seconds later: no crash after the first paint.
 await sleep(5000);
 if (exited !== null) fail(`Inky exited with ${exited} after loading${why()}`);
-app.kill();
+spawnSync("taskkill", ["/PID", String(app.pid), "/F", "/T"], { stdio: "ignore" });
 ok("the app starts, loads its page and runs it");
 console.log(log.trim());
