@@ -1334,19 +1334,20 @@ mod tests {
         );
     }
 
-    /// node_modules/x.md, target/y.md, a symlinked folder, an empty folder,
-    /// and real/a.md. Every document contains "needle".
-    #[cfg(unix)]
+    /// node_modules/x.md, target/y.md, a symlinked folder (not on Windows,
+    /// where links need extra rights), an empty folder, and real/a.md. Every
+    /// document contains "needle".
     fn cluttered_root() -> (tempfile::TempDir, tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let root = canonical(dir.path()).unwrap();
         for p in ["node_modules/x.md", "target/y.md", "real/a.md", "real/__pycache__/z.md"] {
             fs::create_dir_all(root.join(p).parent().unwrap()).unwrap();
             fs::write(root.join(p), "needle").unwrap();
         }
         fs::create_dir(root.join("empty")).unwrap();
         fs::write(elsewhere.path().join("linked.md"), "needle").unwrap();
+        #[cfg(unix)]
         std::os::unix::fs::symlink(elsewhere.path(), root.join("link")).unwrap();
         (dir, elsewhere, root)
     }
@@ -1361,7 +1362,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn workspace_tree_skips_clutter_and_prunes_empty_folders() {
         let (_d, _e, root) = cluttered_root();
         let ws = Library::open(&root).unwrap().without_sidecars();
@@ -1369,7 +1369,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn library_tree_skips_clutter_but_keeps_empty_folders() {
         let (_d, _e, root) = cluttered_root();
         let lib = Library::open(&root).unwrap();
@@ -1377,7 +1376,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn search_and_walk_skip_clutter() {
         let (_d, _e, root) = cluttered_root();
         let lib = Library::open(&root).unwrap();
@@ -1398,7 +1396,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn watch_relevance() {
         let (_d, _e, root) = cluttered_root();
         let r = |p: &str| is_watch_relevant(&root, &root.join(p));
@@ -1428,7 +1425,7 @@ mod tests {
             doc.clone(),
         ];
         let changes = watch_changes(&root, paths.iter().map(|p| p.as_path()));
-        let s = |p: &Path| p.to_string_lossy().into_owned();
+        let s = |p: &Path| path_text(p);
         assert_eq!(
             changes,
             vec![
