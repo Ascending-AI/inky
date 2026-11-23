@@ -12,7 +12,7 @@ pub mod places;
 pub mod recents;
 pub mod themes;
 
-use library::{Config, Library, Node, SearchHit, VersionInfo};
+use library::{path_text, Config, Library, Node, SearchHit, VersionInfo};
 
 fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
@@ -56,7 +56,7 @@ fn open_library(app: &tauri::AppHandle) -> Result<Library, String> {
 }
 
 fn to_string(p: PathBuf) -> String {
-    p.to_string_lossy().into_owned()
+    path_text(&p)
 }
 
 use places::{LinkTarget, Place, Places};
@@ -209,7 +209,7 @@ fn paths_from_args(args: impl IntoIterator<Item = String>, cwd: &Path) -> Vec<Pa
 
 #[tauri::command]
 fn library_root(app: tauri::AppHandle) -> Result<String, String> {
-    Ok(open_library(&app)?.root().to_string_lossy().into_owned())
+    Ok(path_text(open_library(&app)?.root()))
 }
 
 #[tauri::command]
@@ -596,7 +596,7 @@ fn undo_delete(app: tauri::AppHandle, state: tauri::State<UndoStash>, token: Str
         .remove(&token)
         .ok_or("nothing to undo")?;
     let restored = open_library(&app)?.restore_stashed(&entry)?;
-    Ok(restored.to_string_lossy().into_owned())
+    Ok(path_text(&restored))
 }
 
 #[tauri::command]
@@ -741,7 +741,46 @@ fn print_document(window: tauri::WebviewWindow, save_path: Option<String>) -> Re
             })
             .map_err(|e| e.to_string())
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        let Some(path) = save_path else {
+            return window.print().map_err(|e| e.to_string());
+        };
+        // WebView2 writes the PDF itself; the frontend waits for the file.
+        window
+            .with_webview(move |webview| unsafe {
+                use webview2_com::Microsoft::Web::WebView2::Win32::{
+                    ICoreWebView2Environment6, ICoreWebView2_2, ICoreWebView2_7,
+                    COREWEBVIEW2_PRINT_ORIENTATION_PORTRAIT,
+                };
+                use webview2_com::PrintToPdfCompletedHandler;
+                use windows_core::{Interface, HSTRING};
+
+                let Ok(core) = webview.controller().CoreWebView2() else { return };
+                let Ok(core7) = core.cast::<ICoreWebView2_7>() else { return };
+                // Page margins come from the CSS @page rule (app.css), as on macOS;
+                // no Chromium header/footer (title, URL, date).
+                let settings = core
+                    .cast::<ICoreWebView2_2>()
+                    .and_then(|c| c.Environment())
+                    .and_then(|e| e.cast::<ICoreWebView2Environment6>())
+                    .and_then(|e| e.CreatePrintSettings())
+                    .ok();
+                if let Some(s) = &settings {
+                    let _ = s.SetOrientation(COREWEBVIEW2_PRINT_ORIENTATION_PORTRAIT);
+                    let _ = s.SetShouldPrintHeaderAndFooter(false.into());
+                    let _ = s.SetShouldPrintBackgrounds(true.into());
+                    let _ = s.SetMarginTop(0.0);
+                    let _ = s.SetMarginBottom(0.0);
+                    let _ = s.SetMarginLeft(0.0);
+                    let _ = s.SetMarginRight(0.0);
+                }
+                let done = PrintToPdfCompletedHandler::create(Box::new(|_, _| Ok(())));
+                let _ = core7.PrintToPdf(&HSTRING::from(path), settings.as_ref(), &done);
+            })
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = save_path;
         window.print().map_err(|e| e.to_string())
@@ -779,6 +818,9 @@ fn applescript_admin(sh: &str) -> String {
 /// password dialog doesn't block the main thread.
 #[tauri::command]
 async fn install_cli() -> Result<String, String> {
+    if !cfg!(target_os = "macos") {
+        return Err("The inky command is only available on macOS".into());
+    }
     let out = std::process::Command::new("osascript")
         .arg("-e")
         .arg(applescript_admin(&install_shell_command()))
@@ -964,6 +1006,8 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
     };
     let handle = app.handle();
 
+    // macOS: the app menu. Elsewhere its items move to File (Exit) and Help.
+    #[cfg(target_os = "macos")]
     let app_sub = SubmenuBuilder::new(handle, "Inky")
         .about(Some(AboutMetadata::default()))
         .item(&MenuItemBuilder::with_id("check_updates", "Check for Updates…").build(handle)?)
@@ -981,6 +1025,12 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
                 .accelerator("CmdOrCtrl+Q")
                 .build(handle)?,
         )
+        .build()?;
+    #[cfg(not(target_os = "macos"))]
+    let help_sub = SubmenuBuilder::new(handle, "Help")
+        .item(&MenuItemBuilder::with_id("check_updates", "Check for Updates…").build(handle)?)
+        .separator()
+        .about(Some(AboutMetadata::default()))
         .build()?;
 
     let recent_sub = SubmenuBuilder::new(handle, "Open Recent").build()?;
@@ -1039,10 +1089,21 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
             &MenuItemBuilder::with_id("close_tab", "Close Tab")
                 .accelerator("CmdOrCtrl+W")
                 .build(handle)?,
-        )
-        .build()?;
+        );
+    // Custom exit so the frontend can flush unsaved changes first.
+    #[cfg(not(target_os = "macos"))]
+    let file_sub = file_sub.separator().item(
+        &MenuItemBuilder::with_id("quit_app", "Exit")
+            .accelerator("CmdOrCtrl+Q")
+            .build(handle)?,
+    );
+    let file_sub = file_sub.build()?;
 
-    let edit_sub = SubmenuBuilder::new(handle, "Edit")
+    // macOS needs these items for the shortcuts to reach the webview; on
+    // Windows WebView2 handles them itself (and the right-click menu has them).
+    let edit_sub = SubmenuBuilder::new(handle, "Edit");
+    #[cfg(target_os = "macos")]
+    let edit_sub = edit_sub
         .undo()
         .redo()
         .separator()
@@ -1050,7 +1111,8 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
         .copy()
         .paste()
         .select_all()
-        .separator()
+        .separator();
+    let edit_sub = edit_sub
         .item(
             &MenuItemBuilder::with_id("find", "Find…")
                 .accelerator("CmdOrCtrl+F")
@@ -1140,10 +1202,10 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
         .fullscreen()
         .build()?;
 
-    let window_sub = SubmenuBuilder::new(handle, "Window")
-        .minimize()
-        .maximize()
-        .separator()
+    let window_sub = SubmenuBuilder::new(handle, "Window");
+    #[cfg(target_os = "macos")]
+    let window_sub = window_sub.minimize().maximize().separator();
+    let window_sub = window_sub
         .item(
             &MenuItemBuilder::with_id("next_tab", "Show Next Tab")
                 .accelerator("CmdOrCtrl+Shift+]")
@@ -1156,8 +1218,13 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
         )
         .build()?;
 
+    #[cfg(target_os = "macos")]
     let menu = MenuBuilder::new(handle)
         .items(&[&app_sub, &file_sub, &edit_sub, &view_sub, &window_sub])
+        .build()?;
+    #[cfg(not(target_os = "macos"))]
+    let menu = MenuBuilder::new(handle)
+        .items(&[&file_sub, &edit_sub, &view_sub, &window_sub, &help_sub])
         .build()?;
     app.set_menu(menu)?;
     app.state::<RecentMenu>().0.lock().unwrap().sub = Some(recent_sub);

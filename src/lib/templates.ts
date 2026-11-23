@@ -1,3 +1,5 @@
+import { modClick, shortcut } from "./platform";
+
 export const MERMAID_TEMPLATE = `flowchart TD
     A[Start] --> B{Question?}
     B -- Yes --> C[Do the thing]
@@ -14,15 +16,15 @@ notes are always yours.
 
 ## The basics
 
-- **Paste** — copy any markdown, hit the clipboard button (or ⌘⇧V) and it
+- **Paste** — copy any markdown, hit the clipboard button (or ${shortcut("⌘⇧V")}) and it
   becomes a new document.
 - **Edit** — switch between *Reading*, *Split* and *Writing* views from the
-  toolbar (or ⌘1 / ⌘2 / ⌘3). In *Reading*, double-click a paragraph to edit it
+  toolbar (or ${shortcut("⌘1 / ⌘2 / ⌘3")}). In *Reading*, double-click a paragraph to edit it
   in place. Changes autosave.
-- **Tabs** — documents open in tabs; ⌘-click opens one in the background,
-  ⌃Tab switches between them and ⌘W closes the current one.
+- **Tabs** — documents open in tabs; ${modClick} opens one in the background,
+  ${shortcut("⌃Tab")} switches between them and ${shortcut("⌘W")} closes the current one.
 - **Organize** — right-click the sidebar to create folders, rename or delete.
-- **Export** — ⌘P opens the print dialog; choose *Save as PDF*.
+- **Export** — ${shortcut("⌘E")} saves a PDF; ${shortcut("⌘P")} prints.
 - **Themes** — light, dark and book mode, for easy reading.
 
 ## Everything renders nicely

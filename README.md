@@ -1,13 +1,14 @@
 # Inky 🖋️
 
-A small, pleasant macOS app for reading and writing Markdown. It's built for long
-documents (including the long research reports AI agents write) and lets those
-agents work in your library directly through a built-in MCP server.
+A small, pleasant app for macOS and Windows for reading and writing Markdown.
+It's built for long documents (including the long research reports AI agents
+write) and lets those agents work in your library directly through a built-in
+MCP server.
 
 ![Inky](src-tauri/icons/128x128.png)
 
 Your documents stay plain `.md` files in a folder you choose. There's no
-database, no account, and nothing leaves your Mac.
+database, no account, and nothing leaves your computer.
 
 - [Install](#install)
 - [Features](#features)
@@ -19,11 +20,17 @@ database, no account, and nothing leaves your Mac.
 
 ## Install
 
-Download Inky from <https://inky.ascending.ai> and drag it into Applications.
-It needs an Apple-silicon Mac. The app is signed and notarized by Apple, so it
-opens like any other.
+Download Inky from <https://inky.ascending.ai>.
 
-Inky checks for updates on launch and from **Inky → Check for Updates…**.
+- **macOS:** drag it into Applications. It needs an Apple-silicon Mac. The app
+  is signed and notarized by Apple, so it opens like any other.
+- **Windows** (10 or later, 64-bit): run `Inky-setup.exe`. It installs for
+  your user, without admin rights. The installer is not code signed yet, so
+  the first time Windows says it protected your PC: choose **More info**, then
+  **Run anyway**.
+
+Inky checks for updates on launch and from **Inky → Check for Updates…**
+(Windows: **Help → Check for Updates…**).
 
 ## Features
 
@@ -217,6 +224,9 @@ show it to me"*.
 
 ## Keyboard shortcuts
 
+On Windows, Ctrl takes the place of ⌘ (Ctrl+N, Ctrl+Shift+K, …), and the
+menus and tooltips show the Windows names.
+
 | Shortcut | Action |
 | --- | --- |
 | ⌘N | New document |
@@ -285,6 +295,12 @@ backend is Tauri 2 and Rust; the MCP server is `src-tauri/src/mcp.rs`. Run
 | `make mcp` | Run the MCP server on stdio (dev build) |
 | `make clean` | Remove build outputs |
 
+Windows: the same code builds a per-user NSIS installer
+(`src-tauri/tauri.windows.conf.json`). CI's `windows` job (`check.yml`) runs
+the tests on Windows, builds the installer, installs it, and drives the app
+through WebDriver (`scripts/smoke-windows.mjs`, `e2e/windows.mjs`). Each run
+keeps the installer as the artifact `inky-windows-installer`, to try on a PC.
+
 `make dmg` signs the update files with `~/.tauri/inky.key` (override with
 `make dmg KEY=…`). Plain `pnpm tauri build` fails without it; `pnpm bundle` is
 an alias for `make dmg`. It produces:
@@ -312,8 +328,9 @@ in `src-tauri/tauri.conf.json`). Shipping an update:
 
 1. Merge to `main` and push.
 2. Run `git tag v<version> main && git push origin v<version>`. CI
-   (`.github/workflows/release.yml`) builds the app with that version, signs
-   it with the team's Developer ID, has Apple notarize it, and publishes it
+   (`.github/workflows/release.yml`) builds the app with that version for
+   macOS (signed with the team's Developer ID and notarized by Apple) and for
+   Windows (an installer, tried on a Windows runner first), and publishes both
    to the download host and as a GitHub release. Do not bump `version` in
    `tauri.conf.json`: the tag is the version.
 3. Existing installs pick the update up on their next launch. The site shows

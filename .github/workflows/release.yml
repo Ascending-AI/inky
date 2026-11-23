@@ -1,9 +1,11 @@
 name: Release
 
-# A tag vX.Y.Z releases the macOS app. This workflow builds Inky.app for Apple
-# silicon with `make release`, signs it with the team's Developer ID, has Apple
-# notarize it, and publishes it to the download host with the feed that the
-# app's updater reads (plugins.updater in src-tauri/tauri.conf.json). An
+# A tag vX.Y.Z releases Inky for macOS and Windows. The macos job builds Inky.app
+# for Apple silicon with `make release`, signs it with the team's Developer ID
+# and has Apple notarize it. The windows job builds the installer (not code
+# signed yet) and tries it on the runner (scripts/smoke-windows.mjs). When both
+# are done, the publish job puts both on the download host with one feed that
+# the app's updater reads (plugins.updater in src-tauri/tauri.conf.json). An
 # installed app finds the new version at its next check and offers it.
 #
 # The version is the tag's X.Y.Z. tauri.conf.json is not changed.
@@ -28,10 +30,10 @@ env:
   DOWNLOAD_BUCKET: ${{ vars.DOWNLOAD_BUCKET }}
 
 jobs:
-  macos:
-    # An Apple silicon host, named so that a move to a new macOS shows in review.
-    runs-on: macos-26
-    timeout-minutes: 90
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -52,6 +54,14 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Inky $version"
+
+  macos:
+    needs: version
+    # An Apple silicon host, named so that a move to a new macOS shows in review.
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
 
       - name: Settings are set
         env:
@@ -144,7 +154,7 @@ jobs:
 
       - name: Build, sign and notarize
         env:
-          APP_VERSION: ${{ steps.version.outputs.version }}
+          APP_VERSION: ${{ needs.version.outputs.version }}
           APPLE_SIGNING_IDENTITY: ${{ steps.certificate.outputs.identity }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
@@ -168,7 +178,7 @@ jobs:
 
       - name: Check the signature
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           bundle=src-tauri/target/release/bundle
           app=$bundle/macos/Inky.app
@@ -187,6 +197,106 @@ jobs:
             spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
           done
 
+      # The publish job uploads them, with the Windows files, once both builds pass.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upload-macos
+          path: src-tauri/target/release/upload/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove the signing keychain and the keys
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP"/AuthKey_*.p8
+
+  windows:
+    needs: version
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check and test
+        run: |
+          pnpm check
+          pnpm test
+          (cd src-tauri && cargo test)
+          node --test scripts/release-updates.test.mjs
+
+      # tauri.windows.conf.json makes the bundle a per-user NSIS installer.
+      # It is not code signed yet: Windows SmartScreen warns on first run.
+      - name: Build
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          pnpm tauri build \
+            --config "{\"version\":\"$VERSION\"}" \
+            --config "$(node scripts/release-updates.mjs config "$DOWNLOAD_BASE")"
+          node scripts/release-updates.mjs stage "$DOWNLOAD_BASE" "$VERSION" \
+            src-tauri/target/release/bundle src-tauri/target/release/upload src-tauri/tauri.conf.json
+
+      - name: Install and run it
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: node scripts/smoke-windows.mjs "src-tauri/target/release/bundle/nsis/Inky_${VERSION}_x64-setup.exe"
+
+      - name: Use it
+        run: |
+          cargo install tauri-driver --locked
+          export PATH="$(cygpath -u "$EDGEWEBDRIVER"):$PATH"
+          node e2e/windows.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upload-windows
+          path: src-tauri/target/release/upload/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [version, macos, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      # Both staged folders into one: the mirror of the download host.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: upload-*
+          merge-multiple: true
+          path: upload
+
+      - name: The feed covers both platforms
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          node scripts/release-updates.mjs feed "$DOWNLOAD_BASE" "$VERSION" upload
+          for p in darwin-aarch64 windows-x86_64; do
+            jq -e --arg p "$p" '.platforms[$p].signature' upload/app/latest.json > /dev/null \
+              || { echo "::error::upload/app/latest.json has no $p"; exit 1; }
+          done
+          cat upload/app/latest.json
+
       # The version's files first, the feed last: an app never sees a
       # version whose files are not there yet.
       - name: Publish to the download host
@@ -198,26 +308,26 @@ jobs:
           # Checksums only where S3 requires them: other S3 hosts refuse the new default.
           AWS_REQUEST_CHECKSUM_CALCULATION: when_required
           AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          upload=src-tauri/target/release/upload
-          dmg="src-tauri/target/release/bundle/dmg/Inky_${VERSION}_aarch64.dmg"
           put() {
-            aws s3 cp "$1" "$DOWNLOAD_BUCKET/$2" --no-progress \
-              --content-type "$3" --cache-control "$4"
+            aws s3 cp "upload/$1" "$DOWNLOAD_BUCKET/$1" --no-progress \
+              --content-type "$2" --cache-control "$3"
           }
           immutable="public, max-age=31536000, immutable"
-          put "$upload/app/$VERSION/Inky.app.tar.gz" "app/$VERSION/Inky.app.tar.gz" \
-            application/gzip "$immutable"
-          put "$dmg" "app/$VERSION/Inky_${VERSION}_aarch64.dmg" \
-            application/x-apple-diskimage "$immutable"
-          # The link to give people: always the latest installer.
-          put "$upload/Inky.dmg" Inky.dmg application/x-apple-diskimage "public, max-age=300"
-          put "$upload/app/latest.json" app/latest.json application/json "no-cache"
+          latest="public, max-age=300"
+          exe="Inky_${VERSION}_x64-setup.exe"
+          put "app/$VERSION/Inky.app.tar.gz" application/gzip "$immutable"
+          put "app/$VERSION/Inky_${VERSION}_aarch64.dmg" application/x-apple-diskimage "$immutable"
+          put "app/$VERSION/$exe" application/vnd.microsoft.portable-executable "$immutable"
+          # The links to give people: always the latest installers.
+          put Inky.dmg application/x-apple-diskimage "$latest"
+          put Inky-setup.exe application/vnd.microsoft.portable-executable "$latest"
+          put app/latest.json application/json "no-cache"
 
       - name: The download host serves the new feed
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           served=$(curl -fsS "$DOWNLOAD_BASE/app/latest.json" | jq -r .version)
           if [ "$served" != "$VERSION" ]; then
@@ -225,7 +335,9 @@ jobs:
             exit 1
           fi
           curl -fsSI -o /dev/null "$DOWNLOAD_BASE/app/$VERSION/Inky.app.tar.gz"
+          curl -fsSI -o /dev/null "$DOWNLOAD_BASE/app/$VERSION/Inky_${VERSION}_x64-setup.exe"
           curl -fsSI -o /dev/null "$DOWNLOAD_BASE/Inky.dmg"
+          curl -fsSI -o /dev/null "$DOWNLOAD_BASE/Inky-setup.exe"
 
       # latest.json is on the GitHub release too: apps built before the download
       # host read their updates from the latest GitHub release. The feed points
@@ -233,20 +345,16 @@ jobs:
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          bundle=src-tauri/target/release/bundle
+          v=upload/app/$VERSION
           gh release create "$GITHUB_REF_NAME" --verify-tag \
             --title "Inky $VERSION" \
-            --notes "Download: $DOWNLOAD_BASE/app/$VERSION/Inky_${VERSION}_aarch64.dmg" \
+            --notes "Download: macOS $DOWNLOAD_BASE/app/$VERSION/Inky_${VERSION}_aarch64.dmg · Windows $DOWNLOAD_BASE/app/$VERSION/Inky_${VERSION}_x64-setup.exe" \
             --generate-notes \
-            "$bundle/dmg/Inky_${VERSION}_aarch64.dmg" \
-            "$bundle/macos/Inky.app.tar.gz" \
-            "$bundle/macos/Inky.app.tar.gz.sig" \
-            src-tauri/target/release/upload/app/latest.json
-
-      - name: Remove the signing keychain and the keys
-        if: always()
-        run: |
-          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
-          rm -f "$RUNNER_TEMP"/AuthKey_*.p8
+            "$v/Inky_${VERSION}_aarch64.dmg" \
+            "$v/Inky.app.tar.gz" \
+            "$v/Inky.app.tar.gz.sig" \
+            "$v/Inky_${VERSION}_x64-setup.exe" \
+            "$v/Inky_${VERSION}_x64-setup.exe.sig" \
+            upload/app/latest.json

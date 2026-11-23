@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { shortcut } from "$lib/platform";
   import { tick } from "svelte";
   import { fade } from "svelte/transition";
   import { app } from "$lib/state.svelte";
@@ -110,6 +111,6 @@
         }
       }}
     ></textarea>
-    <p class="mt-1 text-[10px] text-muted-foreground">Saved when you click away · ⌘↩ to close</p>
+    <p class="mt-1 text-[10px] text-muted-foreground">Saved when you click away · {shortcut("⌘↩")} to close</p>
   {/if}
 </div>

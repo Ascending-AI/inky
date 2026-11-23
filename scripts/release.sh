@@ -100,5 +100,6 @@ if [ "$notarize" = 1 ]; then
 fi
 echo "✓ dmg: $dmg"
 upload=src-tauri/target/release/upload
+rm -rf "$upload"
 node scripts/release-updates.mjs stage "$download_base" "$version" "$bundle" "$upload" "$conf"
 echo "✓ upload: $upload (copy app/$version/ before app/latest.json)"

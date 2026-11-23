@@ -25,6 +25,8 @@ export interface Platform {
 	requirement: string;
 	/** The first installer is the one that the main button offers. An empty list: no build yet. */
 	installers: Installer[];
+	/** A line under the main button, for something people meet when they install. */
+	note?: string;
 }
 
 export const PLATFORMS: Platform[] = [
@@ -34,7 +36,14 @@ export const PLATFORMS: Platform[] = [
 		requirement: 'macOS 11 or later',
 		installers: [{ label: 'Apple silicon', path: 'Inky.dmg', feedKey: 'darwin-aarch64' }]
 	},
-	{ id: 'windows', name: 'Windows', requirement: '', installers: [] },
+	{
+		id: 'windows',
+		name: 'Windows',
+		requirement: 'Windows 10 or later',
+		installers: [{ label: '64-bit', path: 'Inky-setup.exe', feedKey: 'windows-x86_64' }],
+		// The installer is not code signed yet, so SmartScreen stops it the first time.
+		note: 'If Windows says it protected your PC, choose More info, then Run anyway.'
+	},
 	{ id: 'linux', name: 'Linux', requirement: '', installers: [] }
 ];
 

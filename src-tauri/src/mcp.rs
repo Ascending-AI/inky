@@ -45,6 +45,7 @@ pub type PathEvents = std::sync::Arc<dyn Fn(PathChange) + Send + Sync>;
 
 /// Hand the file to Inky through macOS `open`, exactly like a Finder
 /// double-click — works from the in-app server and from `Inky --mcp` alike.
+#[cfg(target_os = "macos")]
 fn open_in_app(path: &std::path::Path) -> Result<(), String> {
     let status = std::process::Command::new("open")
         .args(["-b", "com.inky.app"])
@@ -56,6 +57,22 @@ fn open_in_app(path: &std::path::Path) -> Result<(), String> {
     } else {
         Err("Could not open the document in Inky — is Inky installed?".into())
     }
+}
+
+/// Launch this same executable with the file, like an Explorer double-click:
+/// the single-instance plugin hands it to the running window (or this starts
+/// one). Not waited on — a first instance runs until the user quits it.
+#[cfg(not(target_os = "macos"))]
+fn open_in_app(path: &std::path::Path) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    std::process::Command::new(exe)
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(drop)
+        .map_err(|e| format!("Could not open the document in Inky: {e}"))
 }
 
 #[derive(Clone)]
@@ -238,8 +255,8 @@ impl InkyMcp {
 
     fn report_move(&self, from: &std::path::Path, to: &std::path::Path) {
         (self.path_events)(PathChange::Moved {
-            from: from.to_string_lossy().into_owned(),
-            to: to.to_string_lossy().into_owned(),
+            from: crate::library::path_text(from),
+            to: crate::library::path_text(to),
         });
     }
 
@@ -285,7 +302,7 @@ impl InkyMcp {
         } else {
             listing
         };
-        ok(format!("Library root: {}\n\n{listing}", self.lib.root().display()))
+        ok(format!("Library root: {}\n\n{listing}", crate::library::path_text(self.lib.root())))
     }
 
     #[tool(
@@ -366,8 +383,8 @@ impl InkyMcp {
         description = "Rename a document in place (comments follow the document). new_name keeps the original extension if none is given."
     )]
     async fn rename_document(&self, Parameters(p): Parameters<RenameParams>) -> CallToolResult {
-        if p.new_name.contains('/') {
-            return reply(Err("new_name must not contain '/'".into()));
+        if crate::library::has_separator(&p.new_name) {
+            return reply(Err("new_name must not contain a path separator".into()));
         }
         let from = match self.lib.resolve(&p.path) {
             Ok(a) => a,
@@ -422,7 +439,7 @@ impl InkyMcp {
             return reply(Err("Only documents can be deleted".into()));
         }
         reply(self.lib.delete(&p.path).map(|_| {
-            (self.path_events)(PathChange::Deleted { path: abs.to_string_lossy().into_owned() });
+            (self.path_events)(PathChange::Deleted { path: crate::library::path_text(&abs) });
             format!("Deleted {}", p.path)
         }))
     }
