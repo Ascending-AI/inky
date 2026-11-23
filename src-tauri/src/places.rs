@@ -226,14 +226,20 @@ impl Places {
     }
 }
 
-/// Hidden folders and `~/Library` (Windows: `~/AppData`) are never reached through a link grant:
-/// the "href occurs in the document" check is no security boundary, since
-/// the webview can write documents.
+/// Hidden folders and `~/Library` (Windows: `~/AppData`, but for its temp
+/// folder, where Windows puts what macOS puts in /tmp) are never reached
+/// through a link grant: the "href occurs in the document" check is no
+/// security boundary, since the webview can write documents.
 fn off_limits(target: &Path, home: Option<&Path>) -> bool {
     let hidden = target
         .components()
         .any(|c| c.as_os_str().to_string_lossy().starts_with('.'));
-    hidden || home.is_some_and(|h| target.starts_with(h.join("Library")) || target.starts_with(h.join("AppData")))
+    hidden
+        || home.is_some_and(|h| {
+            let app_data = h.join("AppData");
+            target.starts_with(h.join("Library"))
+                || (target.starts_with(&app_data) && !target.starts_with(app_data.join("Local").join("Temp")))
+        })
 }
 
 fn percent_decode(s: &str) -> Option<String> {
@@ -569,6 +575,18 @@ mod tests {
         assert!(places.follow_link_from(&f.library, &a, "Library/x.md", home).is_err());
         assert!(places.find(&f.library, &s(&f.outside.join("Library/x.md"))).is_err());
         assert!(places.follow_link_from(&f.library, &a, "b.md", home).unwrap().doc);
+    }
+
+    #[test]
+    fn app_data_is_off_limits_but_its_temp_folder_is_not() {
+        let home = Path::new("/home/me");
+        let at = |p: &str| off_limits(&home.join(p), Some(home));
+        assert!(at("Library/x.md"));
+        assert!(at("AppData/Roaming/com.inky.app/x.md"));
+        assert!(at("AppData/Local/x.md"));
+        assert!(!at("AppData/Local/Temp/notes/x.md"));
+        assert!(!at("Documents/x.md"));
+        assert!(at("Documents/.secret/x.md"));
     }
 
     #[test]

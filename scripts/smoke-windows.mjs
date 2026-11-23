@@ -44,8 +44,20 @@ if (install.status !== 0) fail(`the installer exited with ${install.status ?? in
 const candidates = [path.join(local, "Inky", "Inky.exe"), path.join(local, "Programs", "Inky", "Inky.exe")];
 const exe = candidates.find((p) => fs.existsSync(p)) ?? fail(`Inky.exe is in none of ${candidates.join(", ")}`);
 ok(`installed: ${exe}`);
-const afterInstall = running();
-if (afterInstall) console.log(`! Inky is running after the install (pid, parent, command):\n${afterInstall}`);
+// The installer starts Inky when it is done, as it does for people. Wait for
+// that window, then close it: the test starts its own below.
+let started = "";
+for (let waited = 0; waited < 30_000 && !started; waited += 500) {
+  await sleep(500);
+  started = running();
+}
+if (started) {
+  ok("the installer starts Inky");
+  spawnSync("taskkill", ["/IM", "Inky.exe", "/F"], { stdio: "ignore" });
+  for (let waited = 0; waited < 10_000 && running(); waited += 500) await sleep(500);
+} else {
+  console.log("! the installer did not start Inky");
+}
 
 // A library of our own, so nothing depends on the runner's Documents folder.
 const library = fs.mkdtempSync(path.join(os.tmpdir(), "inky-smoke-"));

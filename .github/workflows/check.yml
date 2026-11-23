@@ -99,7 +99,14 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           cargo install tauri-driver --locked
-          export PATH="$(cygpath -u "$EDGEWEBDRIVER"):$PATH"
+          # The Edge driver that matches this machine's Edge (Tauri's advice).
+          cargo install --git https://github.com/chippers/msedgedriver-tool --locked
+          mkdir -p "$RUNNER_TEMP/edgedriver"
+          (cd "$RUNNER_TEMP/edgedriver" && msedgedriver-tool)
+          export PATH="$RUNNER_TEMP/edgedriver:$PATH"
+          msedgedriver --version
+          # The WebView2 runtime the app uses: its version should match the driver's.
+          reg query 'HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' //v pv || true
           node e2e/windows.mjs
 
       - uses: actions/upload-artifact@v4
