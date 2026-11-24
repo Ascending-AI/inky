@@ -73,6 +73,8 @@ function evidence() {
 
 let socket;
 let nextId = 1;
+/** The page's console messages, errors and browser log, printed on failure. */
+const pageLog = [];
 const pending = new Map();
 
 async function connect() {
@@ -89,6 +91,15 @@ async function connect() {
         });
         socket.onmessage = (event) => {
           const msg = JSON.parse(event.data);
+          if (msg.method === "Runtime.consoleAPICalled") {
+            const text = msg.params.args.map((a) => a.value ?? a.description ?? "").join(" ");
+            pageLog.push(`console.${msg.params.type}: ${text}`);
+          } else if (msg.method === "Runtime.exceptionThrown") {
+            pageLog.push(`exception: ${msg.params.exceptionDetails.exception?.description ?? msg.params.exceptionDetails.text}`);
+          } else if (msg.method === "Log.entryAdded") {
+            const e = msg.params.entry;
+            pageLog.push(`${e.level}: ${e.text}${e.url ? ` (${e.url})` : ""}`);
+          }
           pending.get(msg.id)?.(msg);
           pending.delete(msg.id);
         };
@@ -117,7 +128,7 @@ function cdp(method, params = {}) {
 /** Run `script` (a function body that returns a value) in the page. */
 async function exec(script) {
   const r = await cdp("Runtime.evaluate", {
-    expression: `(() => { ${script} })()`,
+    expression: `(async () => { ${script} })()`,
     returnByValue: true,
     awaitPromise: true,
   });
@@ -194,6 +205,8 @@ async function check(name, fn) {
 
 try {
   console.log(`page: ${await connect()}`);
+  await cdp("Runtime.enable");
+  await cdp("Log.enable");
 
   const shown = (css) => `return !!document.querySelector(${JSON.stringify(css)});`;
   const heading = (title) =>
@@ -216,10 +229,19 @@ try {
   });
 
   await check("a picture next to the document shows", async () => {
-    await waitFor(
-      "the picture to load",
-      `const img = document.querySelector(".prose-doc img"); return !!img && img.complete && img.naturalWidth > 0;`,
-    );
+    try {
+      await waitFor(
+        "the picture to load",
+        `const img = document.querySelector(".prose-doc img"); return !!img && img.complete && img.naturalWidth > 0;`,
+      );
+    } catch (e) {
+      const seen = await exec(`
+        const img = document.querySelector(".prose-doc img");
+        if (!img) return "no img";
+        const status = await fetch(img.currentSrc || img.src).then((r) => r.status + " " + r.headers.get("content-type"), (err) => "fetch failed: " + err);
+        return { html: img.outerHTML, complete: img.complete, width: img.naturalWidth, status };`);
+      throw new Error(`${e.message}; the img: ${JSON.stringify(seen)}`);
+    }
   });
 
   await check("a video next to the document plays", async () => {
@@ -247,16 +269,35 @@ try {
   await check("Ctrl+K opens Quick Open and Escape closes it", async () => {
     await press("k", CTRL);
     await waitFor("Quick Open", shown('input[placeholder="Open document…"]'));
+    await waitFor(
+      "its search box to have focus",
+      `return document.activeElement?.getAttribute("placeholder") === "Open document…" || null;`,
+      5_000,
+    ).catch(async (e) => {
+      const active = await exec(`const a = document.activeElement; return a ? a.outerHTML.slice(0, 200) : "none";`);
+      throw new Error(`${e.message}; focus is on ${active}`);
+    });
     await press("Escape");
     await waitFor("Quick Open to close", `return !document.querySelector('input[placeholder="Open document…"]');`);
   });
 
+  // One failure must not block the next checks: no Quick Open left over.
+  const closeQuickOpen = async () => {
+    if (await exec(`return !!document.querySelector('input[placeholder="Open document…"]');`)) {
+      await press("Escape");
+      await exec(`document.querySelector('input[placeholder="Open document…"]')?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return true;`);
+      await sleep(300);
+    }
+  };
+
   await check("a relative link opens the other document", async () => {
+    await closeQuickOpen();
     await click(".prose-doc a");
     await waitFor("the other document", heading("Other note"));
   });
 
   await check("Ctrl+click opens a background tab and Ctrl+W closes a tab", async () => {
+    await closeQuickOpen();
     await ctrlClick('button[title="Start.md"]');
     await waitFor("two tabs", `return document.querySelectorAll('[role="tab"]').length >= 2;`);
     const before = await exec(`return document.querySelectorAll('[role="tab"]').length;`);
@@ -300,6 +341,7 @@ try {
 }
 
 console.log(`\n${results.join("\n")}`);
+if (failures && pageLog.length) console.log(`\n--- the page's log ---\n${pageLog.slice(-40).join("\n")}`);
 if (failures) {
   console.error(`\n${failures} check(s) failed`);
   process.exit(1);
