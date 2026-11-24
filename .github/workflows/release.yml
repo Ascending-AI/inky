@@ -33,7 +33,7 @@ jobs:
   version:
     runs-on: ubuntu-24.04
     outputs:
-      version: ${{ needs.version.outputs.version }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
         with:
