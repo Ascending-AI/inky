@@ -1,11 +1,27 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "windows": {
       "nsis": {
         "installMode": "currentUser"
       }
     }
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Inky",
+        "width": 1280,
+        "height": 840,
+        "minWidth": 720,
+        "minHeight": 480,
+        "dragDropEnabled": false,
+        "label": "main",
+        "create": false
+      }
+    ]
   }
 }

@@ -1232,6 +1232,42 @@ fn build_menu(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// wry's own WebView2 arguments: no mini menu, no SmartScreen check of every
+/// page (wry issue 535, tauri issue 1345). A window that names its arguments
+/// replaces them, so `main_window_args` repeats them.
+const WEBVIEW2_DEFAULT_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+
+/// The main window's WebView2 arguments: wry's, then those of the standard
+/// WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS variable. WebView2 ignores the variable
+/// once an app passes arguments of its own, as wry always does; adding it here
+/// gives Inky WebView2's usual behaviour, which tools such as the Windows tests
+/// (e2e/windows.mjs, a DevTools port) rely on.
+fn main_window_args(extra: Option<&str>) -> String {
+    match extra.map(str::trim).filter(|e| !e.is_empty()) {
+        Some(extra) => format!("{WEBVIEW2_DEFAULT_ARGS} {extra}"),
+        None => WEBVIEW2_DEFAULT_ARGS.to_string(),
+    }
+}
+
+/// Windows: the main window from its config (`create: false` in
+/// tauri.windows.conf.json), with `main_window_args`.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
+    let conf = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == "main")
+        .cloned()
+        .ok_or_else(|| tauri::Error::WindowNotFound)?;
+    let extra = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").ok();
+    tauri::WebviewWindowBuilder::from_config(app.handle(), &conf)?
+        .additional_browser_args(&main_window_args(extra.as_deref()))
+        .build()?;
+    Ok(())
+}
+
 /// A line for the display diagnostics log, from the page.
 #[tauri::command]
 fn display_log(app: tauri::AppHandle, line: String) {
@@ -1271,6 +1307,8 @@ pub fn run() {
         })
         .setup(|app| {
             displaylog::log(app.handle(), "app start");
+            #[cfg(windows)]
+            create_main_window(app)?;
             build_menu(app)?;
             purge_stash_dir(app.handle());
             start_watcher(app.handle());
@@ -1399,6 +1437,16 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn main_window_keeps_wrys_webview2_args_and_adds_the_variables() {
+        assert_eq!(main_window_args(None), WEBVIEW2_DEFAULT_ARGS);
+        assert_eq!(main_window_args(Some("  ")), WEBVIEW2_DEFAULT_ARGS);
+        assert_eq!(
+            main_window_args(Some("--remote-debugging-port=9333")),
+            format!("{WEBVIEW2_DEFAULT_ARGS} --remote-debugging-port=9333")
+        );
+    }
 
     #[test]
     fn recent_label_shows_name_and_short_folder() {
