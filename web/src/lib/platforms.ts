@@ -47,6 +47,12 @@ export const PLATFORMS: Platform[] = [
 	{ id: 'linux', name: 'Linux', requirement: '', installers: [] }
 ];
 
+/** Names as a sentence: "macOS", "macOS and Windows", "macOS, Windows and Linux". */
+export function nameList(names: string[]): string {
+	if (names.length < 2) return names.join('');
+	return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
+
 /** The download host. A build can set another one with PUBLIC_DOWNLOAD_BASE. */
 export const DEFAULT_DOWNLOAD_BASE = 'https://inky-downloads.ascending.ai';
 

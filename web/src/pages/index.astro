@@ -5,16 +5,25 @@
  * from the update feed (app/latest.json) and selects the visitor's platform.
  *
  * The platforms are in src/lib/platforms.ts. A platform without an installer shows "Not available yet".
+ * Each platform's main button is followed by links to the other platforms' installers, so a
+ * visitor on one system sees at once that Inky runs on the others.
  */
 import icon from '../assets/icon.png';
 import favicon from '../assets/favicon.png';
-import { PLATFORMS, downloadBase, feedUrl, installerUrl } from '../lib/platforms';
+import { PLATFORMS, downloadBase, feedUrl, installerUrl, nameList } from '../lib/platforms';
 import '../styles/site.css';
 
 const base = downloadBase(import.meta.env.PUBLIC_DOWNLOAD_BASE);
 const available = PLATFORMS.filter((p) => p.installers.length > 0);
 // Without the script, the page offers the first platform that has an installer.
 const fallback = available[0]?.id;
+const availableNames = nameList(available.map((p) => p.name));
+
+/** A link to each other platform's installer, for the line under a main button. */
+const others = (id: string) =>
+	available
+		.filter((p) => p.id !== id)
+		.map((p) => ({ name: p.name, href: installerUrl(base, p.installers[0]) }));
 const source = 'https://github.com/Ascending-AI/inky';
 
 const facts = [
@@ -56,8 +65,8 @@ const facts = [
 				<div class="flex flex-col gap-3">
 					<h1 class="font-serif text-5xl font-semibold tracking-tight">Inky</h1>
 					<p class="text-muted-foreground max-w-xl text-lg text-pretty">
-						A small, pleasant app for reading and writing markdown. Your documents stay plain
-						files on your computer.
+						A small, pleasant app for reading and writing markdown, for {availableNames}. Your
+						documents stay plain files on your computer.
 					</p>
 				</div>
 
@@ -87,6 +96,22 @@ const facts = [
 								) : (
 									<p class="border-border bg-card rounded-lg border px-4 py-3 text-sm">
 										Inky is not available for {p.name} yet.
+									</p>
+								)}
+								{others(p.id).length > 0 && (
+									<p class="text-sm">
+										<span class="text-muted-foreground">{main ? 'Also for' : 'Available for'} </span>
+										{others(p.id).map((o, i) => (
+											<>
+												{i > 0 && <span class="text-muted-foreground"> and </span>}
+												<a
+													href={o.href}
+													class="text-link font-medium underline-offset-4 hover:underline"
+												>
+													{o.name}
+												</a>
+											</>
+										))}
 									</p>
 								)}
 							</div>
@@ -132,7 +157,7 @@ const facts = [
 													href={installerUrl(base, i)}
 													class="text-link text-sm font-medium underline-offset-4 hover:underline"
 												>
-													{i.label}
+													Download · {i.label}
 												</a>
 											))}
 										</span>

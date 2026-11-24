@@ -6,7 +6,8 @@ import {
 	downloadBase,
 	feedUrl,
 	feedVersion,
-	installerUrl
+	installerUrl,
+	nameList
 } from './platforms';
 
 const MAC =
@@ -74,6 +75,15 @@ describe('PLATFORMS', () => {
 		for (const p of PLATFORMS.filter((p) => p.installers.length > 0)) {
 			expect(p.requirement).not.toBe('');
 		}
+	});
+});
+
+describe('nameList', () => {
+	it('joins names as a sentence', () => {
+		expect(nameList([])).toBe('');
+		expect(nameList(['macOS'])).toBe('macOS');
+		expect(nameList(['macOS', 'Windows'])).toBe('macOS and Windows');
+		expect(nameList(['macOS', 'Windows', 'Linux'])).toBe('macOS, Windows and Linux');
 	});
 });
 
