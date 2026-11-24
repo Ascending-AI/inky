@@ -94,11 +94,10 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: node scripts/smoke-windows.mjs src-tauri/target/release/bundle/nsis/*-setup.exe
 
-      # WebDriver for WebView2: tauri-driver over the runner's Edge driver.
+      # WebDriver for WebView2: the Edge driver that matches the runner's WebView2.
       - name: Use it
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
-          cargo install tauri-driver --locked
           # The Edge driver that matches this machine's Edge (Tauri's advice).
           cargo install --git https://github.com/chippers/msedgedriver-tool --locked
           mkdir -p "$RUNNER_TEMP/edgedriver"

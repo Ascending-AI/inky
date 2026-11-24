@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Drives the installed Windows app the way a person would, through
-// tauri-driver (WebDriver for WebView2). CI runs it on a windows runner after
+// msedgedriver (WebDriver for WebView2). CI runs it on a windows runner after
 // scripts/smoke-windows.mjs has installed Inky.
 //
 //   node e2e/windows.mjs [path to Inky.exe]
 //
-// Needs tauri-driver and a matching msedgedriver on PATH. No npm packages:
-// the W3C WebDriver protocol is a handful of HTTP calls.
+// Needs msedgedriver on PATH, the version of this machine's WebView2. It is
+// started here the way tauri-driver starts it, with a verbose log. No npm
+// packages: the W3C WebDriver protocol is a handful of HTTP calls.
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -47,8 +48,24 @@ if (others) {
 
 // --- WebDriver -------------------------------------------------------------
 
-const driver = spawn("tauri-driver", [], { stdio: "inherit" });
+const driverLog = path.join(os.tmpdir(), "inky-msedgedriver.log");
+fs.rmSync(driverLog, { force: true });
+// TAURI_WEBVIEW_AUTOMATION: Tauri lets the driver automate the webview.
+const driver = spawn("msedgedriver", ["--port=4444", "--verbose", `--log-path=${driverLog}`], {
+  stdio: "inherit",
+  env: { ...process.env, TAURI_WEBVIEW_AUTOMATION: "true" },
+});
 const base = "http://127.0.0.1:4444";
+
+/** The end of the driver's log and Inky's display log, for a failure. */
+function evidence() {
+  const tail = (f, n) => (fs.existsSync(f) ? fs.readFileSync(f, "utf8").split("\n").slice(-n).join("\n") : "(none)");
+  const local = process.env.LOCALAPPDATA ?? "";
+  const display = [path.join(local, "com.inky.app", "logs", "display.log"), path.join(local, "com.inky.app", "display.log")].find((f) =>
+    fs.existsSync(f),
+  );
+  return `--- msedgedriver log (end) ---\n${tail(driverLog, 60)}\n--- Inky display log (end) ---\n${display ? tail(display, 20) : "(none)"}`;
+}
 let session = "";
 
 async function wd(method, route, body) {
@@ -143,14 +160,20 @@ try {
       await fetch(`${base}/status`);
       break;
     } catch {
-      if (i > 60) throw new Error("tauri-driver did not start");
+      if (i > 60) throw new Error("msedgedriver did not start");
       await sleep(500);
     }
   }
+  // What tauri-driver sends. webviewOptions puts msedgedriver in WebView2
+  // mode; without it, it starts the app as if it were Edge.
   const created = await wd("POST", "/session", {
-    // webviewOptions puts msedgedriver in WebView2 mode; without it, it starts
-    // the app as if it were Edge and waits for a debug port that never opens.
-    capabilities: { alwaysMatch: { "tauri:options": { application: exe, webviewOptions: {} } } },
+    capabilities: {
+      alwaysMatch: {
+        browserName: "webview2",
+        "ms:edgeChromium": true,
+        "ms:edgeOptions": { binary: exe, args: [], webviewOptions: {} },
+      },
+    },
   });
   session = created.sessionId;
 
@@ -242,7 +265,8 @@ try {
   });
 } catch (e) {
   failures++;
-  console.error(`✗ ${e.message}`);
+  console.error(`✗ ${e.message.slice(0, 400)}`);
+  console.error(evidence());
 } finally {
   if (session) await wd("DELETE", `/session/${session}`).catch(() => {});
   driver.kill();

@@ -258,7 +258,6 @@ jobs:
 
       - name: Use it
         run: |
-          cargo install tauri-driver --locked
           # The Edge driver that matches this machine's Edge (Tauri's advice).
           cargo install --git https://github.com/chippers/msedgedriver-tool --locked
           mkdir -p "$RUNNER_TEMP/edgedriver"
