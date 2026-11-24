@@ -32,7 +32,7 @@
   import { attachVideo, swapSource } from "$lib/videoplayer";
   import { isPlayKey, seekBy, seekStep, togglePlay } from "$lib/videokeys";
   import { parseVideoLink } from "$lib/videotime";
-  import { resolveFrom } from "$lib/paths";
+  import { localMediaPath, resolveFrom } from "$lib/paths";
   import { EditorView as CmEditorView, keymap as cmKeymap, drawSelection } from "@codemirror/view";
   import { StateEffect } from "@codemirror/state";
   import { history, defaultKeymap, historyKeymap, indentWithTab } from "@codemirror/commands";
@@ -110,7 +110,7 @@
     for (const img of root.querySelectorAll("img")) {
       const src = img.getAttribute("src") ?? "";
       if (!src || /^(https?:|data:|blob:|asset:|\/\/)/.test(src)) continue;
-      const abs = src.startsWith("/") ? src : `${dir}/${src.replace(/^\.\//, "")}`;
+      const abs = localMediaPath(dir, src);
       // Remember the markdown path so rich edits write it back unchanged.
       img.dataset.mdSrc = src;
       img.dataset.absSrc = abs;
@@ -120,13 +120,7 @@
     for (const video of root.querySelectorAll<HTMLVideoElement>(".video-embed video")) {
       const src = video.getAttribute("src") ?? "";
       if (!src || video.dataset.absSrc || /^(https?:|data:|blob:|asset:|\/\/)/.test(src)) continue;
-      let rel = src;
-      try {
-        rel = decodeURI(src);
-      } catch {
-        // Not percent-encoded after all: use it as written.
-      }
-      const abs = resolveFrom(dir, rel);
+      const abs = localMediaPath(dir, src);
       video.dataset.mdSrc = src;
       video.dataset.absSrc = abs;
       video.src = video.dataset.shownUrl = app.imageUrl(abs);

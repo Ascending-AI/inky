@@ -5,6 +5,7 @@ import {
   isImagePath,
   isVideoPath,
   resolveFrom,
+  localMediaPath,
   isInside,
   parsePathList,
   remapPath,
@@ -66,6 +67,21 @@ describe("resolveFrom", () => {
     expect(resolveFrom("/lib/Notes", "./media/clip.mp4")).toBe("/lib/Notes/media/clip.mp4");
     expect(resolveFrom("/lib/Notes/Deep", "../../videos/clip.mp4")).toBe("/lib/videos/clip.mp4");
     expect(resolveFrom("/lib/Notes", "/abs/clip.mp4")).toBe("/abs/clip.mp4");
+  });
+
+  it("works on Windows paths, which the backend sends with /", () => {
+    expect(resolveFrom("C:/Users/me/Inky/Guides", "../media/dot.png")).toBe("C:/Users/me/Inky/media/dot.png");
+    expect(resolveFrom("C:/Users/me/Inky", "../../../../x.png")).toBe("C:/x.png");
+    expect(resolveFrom("C:/Users/me/Inky", "D:/Pictures/a.png")).toBe("D:/Pictures/a.png");
+    expect(resolveFrom("C:/Users/me/Inky", "D:\\Pictures\\a.png")).toBe("D:/Pictures/a.png");
+  });
+});
+
+describe("localMediaPath", () => {
+  it("decodes and resolves a picture's or video's src, so no .. reaches the file server", () => {
+    expect(localMediaPath("/lib/Guides", "../media/dot.png")).toBe("/lib/media/dot.png");
+    expect(localMediaPath("/lib/Notes", "My%20clip.mp4")).toBe("/lib/Notes/My clip.mp4");
+    expect(localMediaPath("/lib/Notes", "100%.png")).toBe("/lib/Notes/100%.png");
   });
 });
 
