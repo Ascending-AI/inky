@@ -176,7 +176,9 @@ mod tests {
 
     #[test]
     fn add_and_remove_exact_rules() {
-        let d = tree(&["Research/vendor src/a.md", "Research/[draft]*.md"]);
+        // `*` cannot be in a Windows file name; brackets can.
+        let draft = if cfg!(windows) { "Research/[draft] v2.md" } else { "Research/[draft]*.md" };
+        let d = tree(&["Research/vendor src/a.md", draft]);
         let root = d.path();
         let folder = rule_for_path(Path::new("Research/vendor src"), true);
         assert_eq!(folder, "/Research/vendor src/");
@@ -188,9 +190,9 @@ mod tests {
         assert!(is_hidden(root, &root.join("Research/vendor src/a.md")));
 
         // Special characters are escaped, so the rule hides only that file.
-        let odd = rule_for_path(Path::new("Research/[draft]*.md"), false);
+        let odd = rule_for_path(Path::new(draft), false);
         add_rule(root, &odd).unwrap();
-        assert!(is_hidden(root, &root.join("Research/[draft]*.md")));
+        assert!(is_hidden(root, &root.join(draft)));
 
         assert!(remove_rule(root, &folder).unwrap());
         assert!(!remove_rule(root, &folder).unwrap());

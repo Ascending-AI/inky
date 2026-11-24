@@ -2118,6 +2118,7 @@ dependencies = [
  "axum",
  "base64 0.23.1",
  "dirs",
+ "dunce",
  "getrandom 0.3.4",
  "ignore",
  "notify-debouncer-mini",
@@ -2142,6 +2143,8 @@ dependencies = [
  "tokio",
  "tokio-util",
  "trash",
+ "webview2-com",
+ "windows-core 0.61.2",
 ]
 
 [[package]]

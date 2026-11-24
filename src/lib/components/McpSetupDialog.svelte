@@ -38,7 +38,7 @@
     },
     {
       title: "Codex — add to ~/.codex/config.toml",
-      code: `[mcp_servers.inky]\ncommand = "${binary}"\nargs = ["--mcp"]`,
+      code: `[mcp_servers.inky]\ncommand = '${binary}'\nargs = ["--mcp"]`,
     },
   ]);
 

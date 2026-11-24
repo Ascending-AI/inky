@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isMac, modKey } from "$lib/platform";
   import { onMount } from "svelte";
   import { startDisplayLog } from "$lib/displaylog";
   import { slide } from "svelte/transition";
@@ -42,15 +43,17 @@
   let sidebarWidth = $state(240);
   let tocWidth = $state(256);
 
-  function handleMenu(id: string) {
+  function runAction(id: string) {
     const actions: Record<string, () => void> = {
+      go_back: () => app.goBack(),
+      go_forward: () => app.goForward(),
       new_doc: () => app.newDoc(),
       new_diagram: () => app.newDoc(undefined, "mermaid"),
       paste_new: () => app.pasteAsNewDoc(),
       save: () => app.save(),
       close_tab: () => app.closeActiveTab(),
-      next_tab: () => cycleTabs(1, "menu"),
-      prev_tab: () => cycleTabs(-1, "menu"),
+      next_tab: () => app.cycleTabs(1),
+      prev_tab: () => app.cycleTabs(-1),
       export_pdf: () => app.exportPdf(),
       print: () => app.printDoc(),
       find: () => app.openSearch(),
@@ -85,11 +88,24 @@
     actions[id]?.();
   }
 
+  /**
+   * A shortcut can reach us twice: as a native-menu accelerator and as a
+   * keydown in the page (Windows delivers both; macOS only the menu). Run it
+   * once.
+   */
+  let last = { id: "", from: "", at: 0 };
+  function fire(id: string, from: "menu" | "key") {
+    const now = performance.now();
+    if (last.id === id && last.from !== from && now - last.at < 500) return;
+    last = { id, from, at: now };
+    runAction(id);
+  }
+
   onMount(() => {
     sidebarWidth = storedWidth("inky.sidebarWidth", 240, 180, 420);
     tocWidth = storedWidth("inky.tocWidth", 256, 200, 480);
     configureSync(() => app.syncScroll && app.viewMode === "split");
-    const unlisten = listen<string>("menu", (e) => handleMenu(e.payload));
+    const unlisten = listen<string>("menu", (e) => fire(e.payload, "menu"));
     startDisplayLog();
     app.init().then(() => (ready = true));
     // Registered by hand: they must be non-passive to stop the webview's own
@@ -177,22 +193,38 @@
     else if (e.button === 4) app.goForward();
   }
 
-  /**
-   * ⌘⇧] / ⌘⇧[ are menu accelerators, but macOS may not match Shift with
-   * punctuation, so the keydown is a fallback. Whichever arrives second
-   * within 300 ms is the same press and is ignored.
-   */
-  let lastTabCycle: { via: "menu" | "key"; step: 1 | -1; at: number } | null = null;
-
-  function cycleTabs(step: 1 | -1, via: "menu" | "key") {
-    const now = Date.now();
-    const last = lastTabCycle;
-    if (last && last.via !== via && last.step === step && now - last.at < 300) {
-      lastTabCycle = null;
-      return;
+  /** The menu action a ⌘/Ctrl shortcut stands for. */
+  function shortcutAction(event: KeyboardEvent): string | null {
+    const key = event.key.toLowerCase();
+    const shift = event.shiftKey;
+    // ⌘⇧] / ⌘⇧[: by code, since Shift turns the key into } / { on most layouts.
+    if (shift && (event.code === "BracketRight" || event.code === "BracketLeft")) {
+      return event.code === "BracketRight" ? "next_tab" : "prev_tab";
     }
-    lastTabCycle = { via, step, at: now };
-    app.cycleTabs(step);
+    if ((key === "[" || key === "]") && !shift && !inTextInput(event.target)) {
+      return key === "[" ? "go_back" : "go_forward";
+    }
+    if (key === "v") return shift ? "paste_new" : null;
+    if (key === "k") return shift ? "search_library" : "quick_open";
+    if (key === "c") return shift ? "toggle_comments" : null;
+    if (key === "f") return shift ? "focus_mode" : "find";
+    if (key === "n") return shift ? null : "new_doc";
+    const plain: Record<string, string> = {
+      s: "save",
+      w: "close_tab",
+      p: "print",
+      e: "export_pdf",
+      "1": "view_reading",
+      "2": "view_split",
+      "3": "view_writing",
+      "\\": "toggle_sidebar",
+      b: "toggle_sidebar",
+      t: "toggle_toc",
+      "=": "font_plus",
+      "+": "font_plus",
+      "-": "font_minus",
+    };
+    return plain[key] ?? null;
   }
 
   function handleKeydown(event: KeyboardEvent) {
@@ -201,69 +233,16 @@
       app.cycleTabs(event.shiftKey ? -1 : 1);
       return;
     }
-    if (!event.metaKey) return;
-    if (event.shiftKey && (event.code === "BracketRight" || event.code === "BracketLeft")) {
+    // WebView2's browser keys would reload the app and drop unsaved edits.
+    if (!isMac && (event.key === "F5" || (event.ctrlKey && event.key.toLowerCase() === "r"))) {
       event.preventDefault();
-      cycleTabs(event.code === "BracketRight" ? 1 : -1, "key");
       return;
     }
-    const key = event.key.toLowerCase();
-    if ((key === "[" || key === "]") && !event.shiftKey && !inTextInput(event.target)) {
-      event.preventDefault();
-      if (key === "[") app.goBack();
-      else app.goForward();
-    } else if (key === "s") {
-      event.preventDefault();
-      app.save();
-    } else if (key === "n" && !event.shiftKey) {
-      event.preventDefault();
-      app.newDoc();
-    } else if (key === "p") {
-      event.preventDefault();
-      app.printDoc();
-    } else if (key === "e") {
-      event.preventDefault();
-      app.exportPdf();
-    } else if (key === "v" && event.shiftKey) {
-      event.preventDefault();
-      app.pasteAsNewDoc();
-    } else if (key === "1") {
-      event.preventDefault();
-      app.setViewMode("preview");
-    } else if (key === "2") {
-      event.preventDefault();
-      app.setViewMode("split");
-    } else if (key === "3") {
-      event.preventDefault();
-      app.setViewMode("editor");
-    } else if (key === "\\" || key === "b") {
-      event.preventDefault();
-      app.toggleSidebar();
-    } else if (key === "t") {
-      event.preventDefault();
-      app.toggleToc();
-    } else if (key === "k" && event.shiftKey) {
-      event.preventDefault();
-      app.librarySearchVisible = true;
-    } else if (key === "k") {
-      event.preventDefault();
-      app.quickOpenVisible = true;
-    } else if (key === "c" && event.shiftKey) {
-      event.preventDefault();
-      app.toggleComments();
-    } else if (key === "f" && event.shiftKey) {
-      event.preventDefault();
-      app.toggleFocusMode();
-    } else if (key === "f") {
-      event.preventDefault();
-      app.openSearch();
-    } else if (key === "=" || key === "+") {
-      event.preventDefault();
-      app.adjustFontScale(1);
-    } else if (key === "-") {
-      event.preventDefault();
-      app.adjustFontScale(-1);
-    }
+    if (!modKey(event)) return;
+    const id = shortcutAction(event);
+    if (!id) return;
+    event.preventDefault();
+    fire(id, "key");
   }
 </script>
 

@@ -1,6 +1,6 @@
 # Desktop release
 
-A tag `vX.Y.Z` releases the macOS app. GitHub Actions does the build (`.github/workflows/release.yml`). You push the tag.
+A tag `vX.Y.Z` releases the macOS app and the Windows installer. GitHub Actions does the builds (`.github/workflows/release.yml`). You push the tag.
 
 Setup first: the download host (`infra/cloudflare/README.md`), the variables and the secrets below.
 
@@ -15,32 +15,52 @@ Setup first: the download host (`infra/cloudflare/README.md`), the variables and
    git push origin v0.2.0
    ```
 
-4. Watch the run: `gh run watch` or the Actions tab. A run takes about 20 minutes.
+4. Watch the run: `gh run watch` or the Actions tab. A run takes about 30 minutes.
 
 The version is the tag's `X.Y.Z`. Do not change `version` in `tauri.conf.json` for a release.
 
 ## What the workflow does
 
-1. It checks the tag: the form is `vX.Y.Z` and the commit is on `main`.
-2. It checks that each variable and secret is set.
-3. It imports the Developer ID certificate into a temporary keychain. It fails if the certificate is from another team.
-4. It runs the checks and the tests.
-5. It runs `make release` with `APP_VERSION`, `DOWNLOAD_BASE` and the update key. Tauri signs, notarizes and staples the app. The script then notarizes and staples the DMG. It fails if the update is not signed with the key of `tauri.conf.json`.
-6. It checks the signature, the team, Gatekeeper (`spctl`) and the staple, for the app and for the DMG.
-7. It uploads the files to the download host. The feed `app/latest.json` goes last.
-8. It reads the feed back from `DOWNLOAD_BASE` and checks the version.
-9. It makes the GitHub release `vX.Y.Z` with the DMG, the update file, its signature and a copy of the feed.
+The `version` job checks the tag: the form is `vX.Y.Z` and the commit is on `main`. Then two builds run side by side.
+
+The `macos` job:
+
+1. It checks that each variable and secret is set.
+2. It imports the Developer ID certificate into a temporary keychain. It fails if the certificate is from another team.
+3. It runs the checks and the tests.
+4. It runs `make release` with `APP_VERSION`, `DOWNLOAD_BASE` and the update key. Tauri signs, notarizes and staples the app. The script then notarizes and staples the DMG. It fails if the update is not signed with the key of `tauri.conf.json`.
+5. It checks the signature, the team, Gatekeeper (`spctl`) and the staple, for the app and for the DMG.
+6. It keeps the staged files (`src-tauri/target/release/upload/`) for the publish job.
+
+The `windows` job:
+
+1. It runs the checks and the tests, the Rust tests included, on Windows.
+2. It builds the NSIS installer (`src-tauri/tauri.windows.conf.json`) with the version, the download host and the update key, and stages it. The installer is not code signed: Windows SmartScreen warns people the first time.
+3. It installs the installer on the runner and runs it: an agent writes, reads and lists a document over MCP, and the app opens it (`scripts/smoke-windows.mjs`).
+4. It drives the installed app over WebView2's DevTools port: the sidebar, rendering, a picture and a video, shortcuts, tabs, saving, and a document an agent writes while the app is open (`e2e/windows.mjs`).
+5. It keeps the staged files for the publish job.
+
+The `publish` job runs only when both builds pass:
+
+1. It puts the two staged folders together and writes the feed `app/latest.json` with both platforms.
+2. It uploads the files to the download host. The feed goes last.
+3. It reads the feed back from `DOWNLOAD_BASE` and checks the version and the files.
+4. It makes the GitHub release `vX.Y.Z` with both installers, the update files, their signatures and a copy of the feed.
+
+A failed Windows build stops the whole release, the macOS one too: the feed always offers both platforms the same version.
 
 Files on the download host (`<base>` is `DOWNLOAD_BASE`):
 
 | File | What |
 |---|---|
-| `<base>/Inky.dmg` | The latest installer. The download site (`web/`) links to it. |
-| `<base>/app/<version>/Inky_<version>_aarch64.dmg` | The installer of one version. It does not change. |
-| `<base>/app/<version>/Inky.app.tar.gz` | The update file of one version. It does not change. |
+| `<base>/Inky.dmg` | The latest macOS installer. The download site (`web/`) links to it. |
+| `<base>/Inky-setup.exe` | The latest Windows installer. The download site links to it. |
+| `<base>/app/<version>/Inky_<version>_aarch64.dmg` | The macOS installer of one version. It does not change. |
+| `<base>/app/<version>/Inky.app.tar.gz` | The macOS update file of one version. It does not change. |
+| `<base>/app/<version>/Inky_<version>_x64-setup.exe` | The Windows installer of one version, which is also its update file. It does not change. |
 | `<base>/app/latest.json` | The feed that the app's updater reads. It is not cached. |
 
-The build is for Apple silicon only.
+The macOS build is for Apple silicon only. The Windows build is for 64-bit Intel and AMD processors.
 
 ## Apps from before the download host
 

@@ -7,6 +7,28 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// A path as text for the UI and agents: `/`-separated on every platform
+/// (Windows accepts `/`, and the frontend splits paths on it).
+pub fn path_text(p: &Path) -> String {
+    let s = p.to_string_lossy();
+    if cfg!(windows) {
+        s.replace('\\', "/")
+    } else {
+        s.into_owned()
+    }
+}
+
+/// A name with a path separator in it: `/`, and on Windows also `\\`.
+pub fn has_separator(name: &str) -> bool {
+    name.contains('/') || (cfg!(windows) && name.contains('\\'))
+}
+
+/// `fs::canonicalize` without Windows' `\\?\` verbatim prefix, which no
+/// other path (the UI's, the watcher's, the user's) carries.
+pub fn canonical(p: &Path) -> std::io::Result<PathBuf> {
+    dunce::canonicalize(p)
+}
+
 pub const DOC_EXTENSIONS: [&str; 3] = ["md", "markdown", "mmd"];
 /// Images listed in the sidebar tree (previewed, not edited).
 pub const IMAGE_EXTENSIONS: [&str; 9] = ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "heic"];
@@ -142,7 +164,7 @@ pub fn watch_changes<'a>(root: &Path, paths: impl IntoIterator<Item = &'a Path>)
     relevant
         .into_iter()
         .map(|p| WatchChange {
-            path: p.to_string_lossy().into_owned(),
+            path: path_text(p),
             exists: p.exists(),
             is_dir: p.is_dir(),
         })
@@ -320,7 +342,7 @@ fn build_tree(dir: &Path, opts: TreeOpts, rules: &Ignores, in_hidden: bool) -> V
             }
             nodes.push(Node {
                 name,
-                path: path.to_string_lossy().into_owned(),
+                path: path_text(&path),
                 is_dir: true,
                 children,
                 hidden,
@@ -328,7 +350,7 @@ fn build_tree(dir: &Path, opts: TreeOpts, rules: &Ignores, in_hidden: bool) -> V
         } else if is_doc(&path) || is_image(&path) || is_video(&path) {
             nodes.push(Node {
                 name,
-                path: path.to_string_lossy().into_owned(),
+                path: path_text(&path),
                 is_dir: false,
                 children: Vec::new(),
                 hidden,
@@ -360,7 +382,7 @@ fn walk_into(dir: &Path, root: &Path, rules: &Ignores, videos: bool, out: &mut V
         if rules.hides(&path, is_dir) {
             continue;
         }
-        let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().into_owned();
+        let rel = path_text(path.strip_prefix(root).unwrap_or(&path));
         if is_dir {
             out.push(Entry { rel: format!("{rel}/"), kind: EntryKind::Folder });
             walk_into(&path, root, &rules.enter(&path), videos, out);
@@ -571,7 +593,7 @@ impl Library {
     pub fn open(root: impl Into<PathBuf>) -> Result<Library, String> {
         let root: PathBuf = root.into();
         fs::create_dir_all(&root).map_err(|e| e.to_string())?;
-        let root = root.canonicalize().map_err(|e| e.to_string())?;
+        let root = canonical(&root).map_err(|e| e.to_string())?;
         Ok(Library { root, agent_origin: false, sidecars: true })
     }
 
@@ -619,8 +641,8 @@ impl Library {
     /// Library-relative form of an absolute path inside the root ("" for the root).
     pub fn relative(&self, abs: &Path) -> String {
         abs.strip_prefix(&self.root)
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| abs.to_string_lossy().into_owned())
+            .map(path_text)
+            .unwrap_or_else(|_| path_text(abs))
     }
 
     /// Resolve a relative-or-absolute path and refuse anything that escapes
@@ -644,7 +666,7 @@ impl Library {
         }
         // `file_name()` is `None` for a trailing `..`, so the loop above has
         // already rejected any `..` in the not-yet-existing suffix.
-        let mut resolved = existing.canonicalize().map_err(|e| e.to_string())?;
+        let mut resolved = canonical(&existing).map_err(|e| e.to_string())?;
         for part in suffix.iter().rev() {
             resolved.push(part);
         }
@@ -704,7 +726,7 @@ impl Library {
         match ignores::hidden_by(&self.root, &p) {
             None => Ok(()),
             Some((file, rule)) => {
-                let shown = file.strip_prefix(&self.root).unwrap_or(&file).to_string_lossy().into_owned();
+                let shown = path_text(file.strip_prefix(&self.root).unwrap_or(&file));
                 Err(format!("Hidden by the rule \"{rule}\" in {shown}"))
             }
         }
@@ -815,7 +837,7 @@ impl Library {
         }
         let doc = self.resolve(path)?;
         let (parent, stem, ext) = doc_parts(&doc)?;
-        if version.contains('/')
+        if has_separator(version)
             || !version.starts_with(&format!("{stem}."))
             || !version.ends_with(&format!(".{ext}"))
         {
@@ -843,7 +865,7 @@ impl Library {
             for (i, line) in content.lines().enumerate() {
                 if line.to_lowercase().contains(&needle) {
                     hits.push(SearchHit {
-                        path: file.to_string_lossy().into_owned(),
+                        path: path_text(&file),
                         name: name.clone(),
                         line: (i + 1) as u32,
                         text: line.trim().chars().take(200).collect(),
@@ -896,7 +918,7 @@ impl Library {
     pub fn rename(&self, path: &str, new_name: &str) -> Result<PathBuf, String> {
         let p = self.resolve(path)?;
         let new_name = new_name.trim();
-        if new_name.is_empty() || new_name.contains('/') {
+        if new_name.is_empty() || has_separator(new_name) {
             return Err("invalid name".into());
         }
         let parent = p.parent().ok_or("no parent")?;
@@ -1128,6 +1150,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn resolve_rejects_symlink_escape() {
         let (_d, lib) = temp_lib();
         let outside = tempfile::tempdir().unwrap();
@@ -1136,6 +1159,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn resolve_rejects_dangling_symlink() {
         let (_d, lib) = temp_lib();
         let outside = tempfile::tempdir().unwrap();
@@ -1155,7 +1179,7 @@ mod tests {
         let legacy = dir.join("h.2026-01-01-00-00-00.md");
         fs::write(&legacy, "legacy").unwrap();
         let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
-        fs::File::open(&legacy).unwrap().set_modified(old).unwrap();
+        fs::OpenOptions::new().write(true).open(&legacy).unwrap().set_modified(old).unwrap();
         lib.write("h.md", "v2").unwrap(); // snapshots v1 (legacy is older than 10 min)
         lib.write("h.md", "v3").unwrap(); // must NOT snapshot: the newest is seconds old
         let mut names: Vec<String> = fs::read_dir(&dir)
@@ -1244,7 +1268,7 @@ mod tests {
         std::env::set_var("INKY_LIBRARY", dir.path());
         let lib = Library::from_env().unwrap();
         std::env::remove_var("INKY_LIBRARY");
-        assert_eq!(lib.root(), dir.path().canonicalize().unwrap());
+        assert_eq!(lib.root(), canonical(dir.path()).unwrap());
     }
 
     // --- sidecar-less handles (outside documents) ---------------------------
@@ -1310,18 +1334,20 @@ mod tests {
         );
     }
 
-    /// node_modules/x.md, target/y.md, a symlinked folder, an empty folder,
-    /// and real/a.md. Every document contains "needle".
+    /// node_modules/x.md, target/y.md, a symlinked folder (not on Windows,
+    /// where links need extra rights), an empty folder, and real/a.md. Every
+    /// document contains "needle".
     fn cluttered_root() -> (tempfile::TempDir, tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let root = canonical(dir.path()).unwrap();
         for p in ["node_modules/x.md", "target/y.md", "real/a.md", "real/__pycache__/z.md"] {
             fs::create_dir_all(root.join(p).parent().unwrap()).unwrap();
             fs::write(root.join(p), "needle").unwrap();
         }
         fs::create_dir(root.join("empty")).unwrap();
         fs::write(elsewhere.path().join("linked.md"), "needle").unwrap();
+        #[cfg(unix)]
         std::os::unix::fs::symlink(elsewhere.path(), root.join("link")).unwrap();
         (dir, elsewhere, root)
     }
@@ -1354,7 +1380,7 @@ mod tests {
         let (_d, _e, root) = cluttered_root();
         let lib = Library::open(&root).unwrap();
         let hits: Vec<String> = lib.search("needle").into_iter().map(|h| h.path).collect();
-        assert_eq!(hits, vec![root.join("real/a.md").to_string_lossy().into_owned()]);
+        assert_eq!(hits, vec![path_text(&root.join("real/a.md"))]);
         let rels: Vec<String> = lib.walk().into_iter().map(|e| e.rel).collect();
         assert_eq!(rels, vec!["empty/", "real/", "real/a.md"]);
     }
@@ -1399,7 +1425,7 @@ mod tests {
             doc.clone(),
         ];
         let changes = watch_changes(&root, paths.iter().map(|p| p.as_path()));
-        let s = |p: &Path| p.to_string_lossy().into_owned();
+        let s = |p: &Path| path_text(p);
         assert_eq!(
             changes,
             vec![
@@ -1431,6 +1457,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn writes_are_atomic_and_keep_permissions() {
         use std::os::unix::fs::PermissionsExt;
         let (_d, lib) = temp_lib();
@@ -1450,6 +1477,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn writes_through_a_symlinked_document() {
         // (Links out of the library are refused by `resolve`; this one stays inside.)
         let (_d, lib) = temp_lib();
@@ -1578,7 +1606,7 @@ mod tests {
         let tree = lib.tree();
         assert_eq!(tree[0].name, "A");
         assert!(tree[0].is_dir);
-        assert_eq!(tree[0].children[0].path, lib.root().join("A/x.md").to_string_lossy());
+        assert_eq!(tree[0].children[0].path, path_text(&lib.root().join("A/x.md")));
         assert_eq!(tree[1].name, "b.md");
     }
 
@@ -1641,7 +1669,7 @@ mod tests {
         assert_eq!(hits[0].name, "a.md");
         assert_eq!(hits[0].line, 1);
         assert_eq!(hits[0].text, "Hello");
-        assert_eq!(hits[1].path, lib.root().join("sub/b.md").to_string_lossy());
+        assert_eq!(hits[1].path, path_text(&lib.root().join("sub/b.md")));
         assert!(lib.search("   ").is_empty());
     }
 

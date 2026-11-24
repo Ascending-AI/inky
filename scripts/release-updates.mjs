@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Update files for `make release`: the updater config overlay, the signature check and the
-// staged upload folder (app/latest.json, app/<version>/Inky.app.tar.gz, Inky.dmg).
+// Update files for `make release` and the release workflow: the updater config overlay, the
+// signature check and the staged upload folder (app/latest.json, app/<version>/…, Inky.dmg,
+// Inky-setup.exe).
 // The same base rule is used by scripts/release.sh (it calls `check-base`).
 import fs from "node:fs";
 import path from "node:path";
@@ -32,39 +33,86 @@ export function keyId(base64File) {
   return bytes.length >= 10 ? bytes.subarray(2, 10).toString("hex") : null;
 }
 
-export function manifest({ base, version, signature, pubDate }) {
+// What each platform's build leaves in the bundle folder (Tauri's layout) and where it goes on
+// the download host: the update the app installs, the installer people download (versioned,
+// and under a fixed name that always holds the latest one).
+export function platforms(version) {
   return {
-    version,
-    pub_date: pubDate,
-    platforms: { "darwin-aarch64": { signature, url: `${base}/app/${version}/Inky.app.tar.gz` } },
+    "darwin-aarch64": {
+      update: { from: "macos/Inky.app.tar.gz", to: "Inky.app.tar.gz" },
+      installer: { from: `dmg/Inky_${version}_aarch64.dmg`, to: `Inky_${version}_aarch64.dmg` },
+      latest: "Inky.dmg",
+    },
+    "windows-x86_64": {
+      // The NSIS installer is also the update: the app runs it quietly.
+      update: { from: `nsis/Inky_${version}_x64-setup.exe`, to: `Inky_${version}_x64-setup.exe` },
+      installer: { from: `nsis/Inky_${version}_x64-setup.exe`, to: `Inky_${version}_x64-setup.exe` },
+      latest: "Inky-setup.exe",
+    },
   };
 }
 
+// The feed: `signatures` maps each built platform to its update's signature.
+export function manifest({ base, version, signatures, pubDate }) {
+  const all = platforms(version);
+  const entries = Object.entries(signatures).map(([key, signature]) => {
+    if (!all[key]) throw new Error(`unknown platform ${key}`);
+    return [key, { signature, url: `${base}/app/${version}/${all[key].update.to}` }];
+  });
+  if (!entries.length) throw new Error("no platform was built");
+  return { version, pub_date: pubDate, platforms: Object.fromEntries(entries) };
+}
+
+// Stage whatever this machine built into outDir, a mirror of the download host:
+// app/<version>/<update>, its .sig, the versioned installer, <latest installer name>, and
+// app/<version>/<platform>.sig.json for `feed`. Then write the feed from every platform staged
+// in outDir so far (CI stages each platform on its own runner and merges the folders).
 function stage(base, version, bundleDir, outDir, confFile) {
   checkBase(base);
-  const tar = path.join(bundleDir, "macos/Inky.app.tar.gz");
-  const dmg = path.join(bundleDir, `dmg/Inky_${version}_aarch64.dmg`);
-  for (const f of [tar, `${tar}.sig`, dmg]) {
-    if (!fs.existsSync(f)) throw new Error(`missing ${f}`);
-  }
-  const signature = fs.readFileSync(`${tar}.sig`, "utf8").trim();
-  // An installed app accepts only an update signed with the key it was built with.
   const pubkey = JSON.parse(fs.readFileSync(confFile, "utf8")).plugins?.updater?.pubkey ?? "";
   const want = keyId(pubkey);
-  if (!want || keyId(signature) !== want) {
-    throw new Error(
-      `the update is not signed with the key of ${confFile} (plugins.updater.pubkey): installed apps would refuse it`,
-    );
+  const dir = path.join(outDir, "app", version);
+  let staged = 0;
+  for (const [key, p] of Object.entries(platforms(version))) {
+    const update = path.join(bundleDir, p.update.from);
+    const installer = path.join(bundleDir, p.installer.from);
+    const found = [update, `${update}.sig`, installer].filter((f) => fs.existsSync(f));
+    if (!found.length) continue;
+    if (found.length < 3) {
+      const missing = [update, `${update}.sig`, installer].filter((f) => !fs.existsSync(f));
+      throw new Error(`missing ${missing.join(", ")}`);
+    }
+    const signature = fs.readFileSync(`${update}.sig`, "utf8").trim();
+    // An installed app accepts only an update signed with the key it was built with.
+    if (!want || keyId(signature) !== want) {
+      throw new Error(
+        `the ${key} update is not signed with the key of ${confFile} (plugins.updater.pubkey): installed apps would refuse it`,
+      );
+    }
+    fs.mkdirSync(dir, { recursive: true });
+    fs.copyFileSync(update, path.join(dir, p.update.to));
+    fs.writeFileSync(path.join(dir, `${p.update.to}.sig`), signature + "\n");
+    fs.copyFileSync(installer, path.join(dir, p.installer.to));
+    fs.copyFileSync(installer, path.join(outDir, p.latest));
+    fs.writeFileSync(path.join(dir, `${key}.sig.json`), JSON.stringify({ signature }) + "\n");
+    staged++;
   }
-  const app = path.join(outDir, "app");
-  fs.rmSync(app, { recursive: true, force: true });
-  fs.mkdirSync(path.join(app, version), { recursive: true });
-  fs.copyFileSync(tar, path.join(app, version, "Inky.app.tar.gz"));
-  fs.writeFileSync(
-    path.join(app, "latest.json"),
-    JSON.stringify(manifest({ base, version, signature, pubDate: new Date().toISOString() }), null, 2) + "\n",
-  );
-  fs.copyFileSync(dmg, path.join(outDir, "Inky.dmg"));
+  if (!staged) throw new Error(`no build in ${bundleDir}`);
+  feed(base, version, outDir);
+}
+
+// app/latest.json from the platforms staged under outDir/app/<version>/.
+function feed(base, version, outDir) {
+  checkBase(base);
+  const dir = path.join(outDir, "app", version);
+  const signatures = {};
+  for (const key of Object.keys(platforms(version))) {
+    const f = path.join(dir, `${key}.sig.json`);
+    if (fs.existsSync(f)) signatures[key] = JSON.parse(fs.readFileSync(f, "utf8")).signature;
+  }
+  const latest = manifest({ base, version, signatures, pubDate: new Date().toISOString() });
+  fs.writeFileSync(path.join(outDir, "app", "latest.json"), JSON.stringify(latest, null, 2) + "\n");
+  console.log(`[release] feed: ${Object.keys(signatures).join(", ")}`);
 }
 
 function main(argv) {
@@ -72,7 +120,8 @@ function main(argv) {
   if (cmd === "check-base" && a.length === 1) checkBase(a[0]);
   else if (cmd === "config" && a.length === 1) console.log(JSON.stringify(updaterConfig(a[0])));
   else if (cmd === "stage" && a.length === 5) stage(...a);
-  else throw new Error("usage: release-updates.mjs check-base <base> | config <base> | stage <base> <version> <bundle-dir> <out-dir> <tauri.conf.json>");
+  else if (cmd === "feed" && a.length === 3) feed(...a);
+  else throw new Error("usage: release-updates.mjs check-base <base> | config <base> | stage <base> <version> <bundle-dir> <out-dir> <tauri.conf.json> | feed <base> <version> <out-dir>");
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

@@ -58,9 +58,16 @@ export function isVideoPath(path: string): boolean {
   return VIDEO_RE.test(path);
 }
 
-/** `rel` resolved against the folder `dir` (an absolute `rel` stands as is). */
+/** `C:/…` or `C:\…`: an absolute Windows path. */
+const DRIVE_RE = /^[A-Za-z]:[\\/]/;
+
+/**
+ * `rel` resolved against the folder `dir`, `.` and `..` included. An absolute
+ * `rel` (`/…`, or `C:/…` on Windows) stands as is, with `/` separators.
+ */
 export function resolveFrom(dir: string, rel: string): string {
   if (rel.startsWith("/")) return rel;
+  if (DRIVE_RE.test(rel)) return rel.replace(/\\/g, "/");
   const parts = dir.split("/");
   for (const part of rel.split("/")) {
     if (part === "..") {
@@ -70,6 +77,21 @@ export function resolveFrom(dir: string, rel: string): string {
     }
   }
   return parts.join("/");
+}
+
+/**
+ * The file a picture's or video's `src` in a document stands for: decoded
+ * (`My%20clip.mp4`) and resolved against the document's folder `dir`. The file
+ * server refuses a path with `..` left in it.
+ */
+export function localMediaPath(dir: string, src: string): string {
+  let rel = src;
+  try {
+    rel = decodeURI(src);
+  } catch {
+    // A literal "%" in the name: use it as written.
+  }
+  return resolveFrom(dir, rel);
 }
 
 /** `path` after `from` was renamed or moved to `to` (unchanged if unaffected). */

@@ -40,6 +40,73 @@ jobs:
 
       - run: node --test scripts/release-updates.test.mjs
 
+  # Windows: the tests, then the installer, installed and used on the runner
+  # (scripts/smoke-windows.mjs, e2e/windows.mjs). The installer is kept as an
+  # artifact of the run, to try on a Windows PC.
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      # From here on each step runs even when one before it failed: one run
+      # shows every Windows problem. The job still fails.
+      - run: pnpm check
+        if: ${{ !cancelled() }}
+
+      - run: pnpm test
+        if: ${{ !cancelled() }}
+
+      - run: cargo test
+        if: ${{ !cancelled() }}
+        working-directory: src-tauri
+
+      - run: node --test scripts/release-updates.test.mjs
+        if: ${{ !cancelled() }}
+
+      # No update files: they need the update key, and this build is not published.
+      - name: Build the installer
+        id: build
+        if: ${{ !cancelled() }}
+        run: pnpm tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Install and run it
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: node scripts/smoke-windows.mjs src-tauri/target/release/bundle/nsis/*-setup.exe
+
+      # The installed app, driven over WebView2's DevTools port (e2e/windows.mjs).
+      - name: Use it
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: node e2e/windows.mjs
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: inky-windows-installer
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: ignore
+          retention-days: 14
+
   # The download site (web/): its own package and lockfile.
   web:
     runs-on: ubuntu-24.04

@@ -3,7 +3,7 @@
 //! Both are sidecar-less `Library` handles, so `Library::resolve` keeps doing
 //! all the confinement. Grants are only ever created from Rust code paths.
 
-use crate::library::{is_doc, is_video, Library};
+use crate::library::{canonical, is_doc, is_video, path_text, Library};
 use crate::opens::OpenRequest;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -79,7 +79,7 @@ impl Places {
         }
         let lib = Library::open(dir)?.without_sidecars();
         let root = lib.root().to_path_buf();
-        let open: Vec<String> = self.open.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        let open: Vec<String> = self.open.iter().map(|p| path_text(p)).collect();
         self.close_workspace(&open);
         self.workspace = Some(lib);
         Ok(root)
@@ -106,7 +106,7 @@ impl Places {
     }
 
     pub fn grant_file(&mut self, path: &Path) -> Result<PathBuf, String> {
-        let p = path.canonicalize().map_err(|_| format!("Not found: {}", path.display()))?;
+        let p = canonical(path).map_err(|_| format!("Not found: {}", path.display()))?;
         if !p.is_file() || !is_doc(&p) {
             return Err(format!("Not a Markdown document: {}", p.display()));
         }
@@ -120,19 +120,19 @@ impl Places {
     pub fn open_path(&mut self, library: &Library, path: &Path) -> Option<OpenRequest> {
         if path.is_dir() {
             let root = self.set_workspace(path).ok()?;
-            return Some(OpenRequest::Folder { path: root.to_string_lossy().into_owned() });
+            return Some(OpenRequest::Folder { path: path_text(&root) });
         }
         if is_video(path) {
             // Played from where it is: only videos a place already reaches.
-            let canon = path.canonicalize().ok()?.to_string_lossy().into_owned();
+            let canon = path_text(&canonical(path).ok()?);
             self.find(library, &canon).ok()?;
             return Some(OpenRequest::File { path: canon });
         }
         if !is_doc(path) {
             return None;
         }
-        let canonical = path.canonicalize().ok()?;
-        let canon = canonical.to_string_lossy().into_owned();
+        let canonical = canonical(path).ok()?;
+        let canon = path_text(&canonical);
         if self.find(library, &canon).is_err() {
             self.grant_file(&canonical).ok()?;
         }
@@ -143,10 +143,8 @@ impl Places {
     /// paths (as spelled, or the same file by another spelling, e.g. through a
     /// symlink); reachable ones pass through, outside ones are granted.
     pub fn grant_listed(&mut self, library: &Library, listed: &[String], path: &str) -> Result<PathBuf, String> {
-        let canonical = Path::new(path).canonicalize().ok();
-        let same = |r: &String| {
-            r == path || canonical.is_some() && Path::new(r).canonicalize().ok() == canonical
-        };
+        let canon = canonical(Path::new(path)).ok();
+        let same = |r: &String| r == path || canon.is_some() && canonical(Path::new(r)).ok() == canon;
         if !listed.iter().any(same) {
             return Err("Not a recent or open document".into());
         }
@@ -167,7 +165,7 @@ impl Places {
         }
         let p = Path::new(path);
         if p.is_absolute() {
-            if let Ok(c) = p.canonicalize() {
+            if let Ok(c) = canonical(p) {
                 if self.files.contains(&c) {
                     let parent = c.parent().ok_or("invalid path")?;
                     let lib = Library::open(parent)?.without_sidecars();
@@ -211,11 +209,9 @@ impl Places {
             return Err(format!("Not a link in this document: {href}"));
         }
         let dir = from.parent().ok_or("invalid path")?;
-        let target = dir
-            .join(decoded)
-            .canonicalize()
+        let target = canonical(&dir.join(decoded))
             .map_err(|_| format!("Linked file not found: {href}"))?;
-        let path = target.to_string_lossy().into_owned();
+        let path = path_text(&target);
         let reachable = self.find(library, &path).is_ok();
         if !reachable && off_limits(&target, home) {
             return Err(format!("Linked file not found: {href}"));
@@ -230,14 +226,20 @@ impl Places {
     }
 }
 
-/// Hidden folders and `~/Library` are never reached through a link grant:
-/// the "href occurs in the document" check is no security boundary, since
-/// the webview can write documents.
+/// Hidden folders and `~/Library` (Windows: `~/AppData`, but for its temp
+/// folder, where Windows puts what macOS puts in /tmp) are never reached
+/// through a link grant: the "href occurs in the document" check is no
+/// security boundary, since the webview can write documents.
 fn off_limits(target: &Path, home: Option<&Path>) -> bool {
     let hidden = target
         .components()
         .any(|c| c.as_os_str().to_string_lossy().starts_with('.'));
-    hidden || home.is_some_and(|h| target.starts_with(h.join("Library")))
+    hidden
+        || home.is_some_and(|h| {
+            let app_data = h.join("AppData");
+            target.starts_with(h.join("Library"))
+                || (target.starts_with(&app_data) && !target.starts_with(app_data.join("Local").join("Temp")))
+        })
 }
 
 fn percent_decode(s: &str) -> Option<String> {
@@ -273,7 +275,7 @@ mod tests {
         let lib_dir = tempdir();
         let out_dir = tempdir();
         let library = Library::open(lib_dir.path()).unwrap();
-        let outside = out_dir.path().canonicalize().unwrap();
+        let outside = canonical(out_dir.path()).unwrap();
         fs::write(outside.join("a.md"), "A").unwrap();
         fs::write(outside.join("b.md"), "B").unwrap();
         fs::write(outside.join("notes.txt"), "T").unwrap();
@@ -288,7 +290,7 @@ mod tests {
     }
 
     fn s(p: &Path) -> String {
-        p.to_string_lossy().into_owned()
+        path_text(p)
     }
 
     #[test]
@@ -345,6 +347,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn granted_file_found_by_non_canonical_path() {
         let f = fixture();
         let link_dir = tempdir();
@@ -575,6 +578,18 @@ mod tests {
     }
 
     #[test]
+    fn app_data_is_off_limits_but_its_temp_folder_is_not() {
+        let home = Path::new("/home/me");
+        let at = |p: &str| off_limits(&home.join(p), Some(home));
+        assert!(at("Library/x.md"));
+        assert!(at("AppData/Roaming/com.inky.app/x.md"));
+        assert!(at("AppData/Local/x.md"));
+        assert!(!at("AppData/Local/Temp/notes/x.md"));
+        assert!(!at("Documents/x.md"));
+        assert!(at("Documents/.secret/x.md"));
+    }
+
+    #[test]
     fn follow_link_reaches_hidden_folders_inside_places() {
         let f = fixture();
         fs::create_dir(f.library.root().join(".notes")).unwrap();
@@ -601,7 +616,7 @@ mod tests {
         let inside = f.library.root().join("clip.mp4");
         fs::write(&inside, b"v").unwrap();
         let req = places.open_path(&f.library, &inside);
-        let canon = s(&inside.canonicalize().unwrap());
+        let canon = s(&canonical(&inside).unwrap());
         assert_eq!(req, Some(OpenRequest::File { path: canon }));
         let outside = f.outside.join("clip.mp4");
         fs::write(&outside, b"v").unwrap();
@@ -667,6 +682,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn grant_listed_matches_a_symlinked_spelling() {
         let f = fixture();
         let link_dir = tempdir();

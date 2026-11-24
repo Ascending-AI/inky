@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { modKey, shortcut } from "$lib/platform";
   import { onMount, tick, untrack } from "svelte";
   import { app, type CommentDraft } from "$lib/state.svelte";
   import { toggleTaskMarker } from "$lib/tasks";
@@ -31,7 +32,7 @@
   import { attachVideo, swapSource } from "$lib/videoplayer";
   import { isPlayKey, seekBy, seekStep, togglePlay } from "$lib/videokeys";
   import { parseVideoLink } from "$lib/videotime";
-  import { resolveFrom } from "$lib/paths";
+  import { localMediaPath, resolveFrom } from "$lib/paths";
   import { EditorView as CmEditorView, keymap as cmKeymap, drawSelection } from "@codemirror/view";
   import { StateEffect } from "@codemirror/state";
   import { history, defaultKeymap, historyKeymap, indentWithTab } from "@codemirror/commands";
@@ -109,7 +110,7 @@
     for (const img of root.querySelectorAll("img")) {
       const src = img.getAttribute("src") ?? "";
       if (!src || /^(https?:|data:|blob:|asset:|\/\/)/.test(src)) continue;
-      const abs = src.startsWith("/") ? src : `${dir}/${src.replace(/^\.\//, "")}`;
+      const abs = localMediaPath(dir, src);
       // Remember the markdown path so rich edits write it back unchanged.
       img.dataset.mdSrc = src;
       img.dataset.absSrc = abs;
@@ -119,13 +120,7 @@
     for (const video of root.querySelectorAll<HTMLVideoElement>(".video-embed video")) {
       const src = video.getAttribute("src") ?? "";
       if (!src || video.dataset.absSrc || /^(https?:|data:|blob:|asset:|\/\/)/.test(src)) continue;
-      let rel = src;
-      try {
-        rel = decodeURI(src);
-      } catch {
-        // Not percent-encoded after all: use it as written.
-      }
-      const abs = resolveFrom(dir, rel);
+      const abs = localMediaPath(dir, src);
       video.dataset.mdSrc = src;
       video.dataset.absSrc = abs;
       video.src = video.dataset.shownUrl = app.imageUrl(abs);
@@ -731,7 +726,7 @@
       } else if (
         (ev.key === "ArrowDown" || ev.key === "ArrowUp") &&
         !ev.shiftKey &&
-        !ev.metaKey &&
+        !modKey(ev) &&
         !ev.altKey
       ) {
         const dir = ev.key === "ArrowDown" ? 1 : -1;
@@ -1496,7 +1491,7 @@
   function handleClick(event: MouseEvent) {
     const openVideo = (event.target as HTMLElement).closest<HTMLElement>(".video-open");
     if (openVideo?.dataset.path) {
-      app.openInTab(openVideo.dataset.path, { background: event.metaKey });
+      app.openInTab(openVideo.dataset.path, { background: modKey(event) });
       return;
     }
     const chg = (event.target as HTMLElement).closest<HTMLElement>(CHANGE_SELECTOR);
@@ -1532,7 +1527,7 @@
       // Never let a link navigate the webview itself (that's how you end up
       // on an unescapable 404 page).
       event.preventDefault();
-      handleLink(anchor.getAttribute("href") ?? "", event.metaKey);
+      handleLink(anchor.getAttribute("href") ?? "", modKey(event));
       return;
     }
     const media = (event.target as HTMLElement).closest<Element>("img, .mermaid-block svg");
@@ -1749,8 +1744,8 @@
       onmousedown={(e) => e.preventDefault()}
     >
       {#each [
-        { icon: Bold, title: "Bold (⌘B)", action: () => execCmd("bold") },
-        { icon: Italic, title: "Italic (⌘I)", action: () => execCmd("italic") },
+        { icon: Bold, title: shortcut("Bold (⌘B)"), action: () => execCmd("bold") },
+        { icon: Italic, title: shortcut("Italic (⌘I)"), action: () => execCmd("italic") },
         { icon: Strikethrough, title: "Strikethrough", action: () => execCmd("strikethrough") },
         { icon: Code, title: "Inline code", action: toggleInlineCode },
       ] as b (b.title)}

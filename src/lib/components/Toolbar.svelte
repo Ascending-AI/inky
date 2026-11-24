@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { fileManager, isMac, modKey, shortcut } from "$lib/platform";
   import { app, FONT_SCALES, READING_WIDTHS, type ReadingWidth } from "$lib/state.svelte";
   import {
     DEFAULT_TYPOGRAPHY,
@@ -75,9 +76,9 @@
   }
 
   const viewModes: { mode: ViewMode; label: string; icon: typeof BookOpen }[] = [
-    { mode: "preview", label: "Reading (⌘1)", icon: BookOpen },
-    { mode: "split", label: "Split (⌘2)", icon: Columns2 },
-    { mode: "editor", label: "Writing (⌘3)", icon: PenLine },
+    { mode: "preview", label: shortcut("Reading (⌘1)"), icon: BookOpen },
+    { mode: "split", label: shortcut("Split (⌘2)"), icon: Columns2 },
+    { mode: "editor", label: shortcut("Writing (⌘3)"), icon: PenLine },
   ];
 
   const ThemeIcon = $derived(
@@ -133,7 +134,7 @@
     {:else}
       <DropdownMenu.Item
         class={node.path === app.currentPath ? "font-medium" : ""}
-        onclick={(e) => app.openInTab(node.path, { background: e.metaKey })}
+        onclick={(e) => app.openInTab(node.path, { background: modKey(e) })}
         onauxclick={(e) => {
           if (e.button !== 1) return;
           e.preventDefault();
@@ -153,9 +154,9 @@
   {/each}
 {/snippet}
 
-<!-- pl-[88px] clears the macOS traffic lights (overlay title bar) -->
+<!-- On macOS, pl-[88px] clears the traffic lights (overlay title bar) -->
 <header
-  class="no-print flex h-12 shrink-0 items-center gap-1 border-b bg-background pr-2 pl-[88px]"
+  class="no-print flex h-12 shrink-0 items-center gap-1 border-b bg-background pr-2 {isMac ? 'pl-[88px]' : 'pl-2'}"
   data-tauri-drag-region
 >
   <Tooltip.Provider delayDuration={400}>
@@ -167,7 +168,7 @@
           </Button>
         {/snippet}
       </Tooltip.Trigger>
-      <Tooltip.Content>Toggle sidebar (⌘B)</Tooltip.Content>
+      <Tooltip.Content>{shortcut("Toggle sidebar (⌘B)")}</Tooltip.Content>
     </Tooltip.Root>
 
     <Tooltip.Root>
@@ -184,7 +185,7 @@
           </Button>
         {/snippet}
       </Tooltip.Trigger>
-      <Tooltip.Content>Back (⌘[)</Tooltip.Content>
+      <Tooltip.Content>{shortcut("Back (⌘[)")}</Tooltip.Content>
     </Tooltip.Root>
     <Tooltip.Root>
       <Tooltip.Trigger>
@@ -200,7 +201,7 @@
           </Button>
         {/snippet}
       </Tooltip.Trigger>
-      <Tooltip.Content>Forward (⌘])</Tooltip.Content>
+      <Tooltip.Content>{shortcut("Forward (⌘])")}</Tooltip.Content>
     </Tooltip.Root>
 
     <div class="ml-1 flex min-w-0 items-center gap-2">
@@ -309,7 +310,7 @@
           </Button>
         {/snippet}
       </Tooltip.Trigger>
-      <Tooltip.Content>Table of contents (⌘T)</Tooltip.Content>
+      <Tooltip.Content>{shortcut("Table of contents (⌘T)")}</Tooltip.Content>
     </Tooltip.Root>
 
     <Tooltip.Root>
@@ -335,7 +336,7 @@
         {/snippet}
       </Tooltip.Trigger>
       <Tooltip.Content>
-        {app.docSidecars ? "Comments (⌘⇧C)" : "Not available for files outside the library"}
+        {app.docSidecars ? shortcut("Comments (⌘⇧C)") : "Not available for files outside the library"}
       </Tooltip.Content>
     </Tooltip.Root>
 
@@ -379,7 +380,7 @@
         {/snippet}
       </Tooltip.Trigger>
       <Tooltip.Content>
-        {app.docSidecars ? "Version history (⌘Y)" : "Not available for files outside the library"}
+        {app.docSidecars ? shortcut("Version history (⌘Y)") : "Not available for files outside the library"}
       </Tooltip.Content>
     </Tooltip.Root>
 
@@ -419,7 +420,7 @@
           </Button>
         {/snippet}
       </Tooltip.Trigger>
-      <Tooltip.Content>Find in document (⌘F)</Tooltip.Content>
+      <Tooltip.Content>{shortcut("Find in document (⌘F)")}</Tooltip.Content>
     </Tooltip.Root>
 
     <Separator orientation="vertical" class="mx-1 !h-5" />
@@ -432,7 +433,7 @@
           </Button>
         {/snippet}
       </Tooltip.Trigger>
-      <Tooltip.Content>Paste clipboard as new document (⌘⇧V)</Tooltip.Content>
+      <Tooltip.Content>{shortcut("Paste clipboard as new document (⌘⇧V)")}</Tooltip.Content>
     </Tooltip.Root>
 
     <DropdownMenu.Root>
@@ -465,7 +466,7 @@
           </Button>
         {/snippet}
       </Tooltip.Trigger>
-      <Tooltip.Content>Export PDF (⌘E)</Tooltip.Content>
+      <Tooltip.Content>{shortcut("Export PDF (⌘E)")}</Tooltip.Content>
     </Tooltip.Root>
 
     <Popover.Root bind:open={readingOpen}>
@@ -709,7 +710,7 @@
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end" class="w-56">
         <DropdownMenu.Item disabled={!app.currentPath} onclick={() => app.printDoc()}>
-          Print… <DropdownMenu.Shortcut>⌘P</DropdownMenu.Shortcut>
+          Print… <DropdownMenu.Shortcut>{shortcut("⌘P")}</DropdownMenu.Shortcut>
         </DropdownMenu.Item>
         <DropdownMenu.Item
           disabled={!app.currentPath || !app.docSidecars}
@@ -719,7 +720,7 @@
         </DropdownMenu.Item>
         <DropdownMenu.Separator />
         <DropdownMenu.Item onclick={() => app.refreshTree()}>Refresh library</DropdownMenu.Item>
-        <DropdownMenu.Item onclick={revealLibrary}>Reveal library in Finder</DropdownMenu.Item>
+        <DropdownMenu.Item onclick={revealLibrary}>Reveal library in {fileManager}</DropdownMenu.Item>
         <DropdownMenu.Separator />
         <DropdownMenu.Item onclick={() => app.chooseLibrary()}>
           Change library folder…

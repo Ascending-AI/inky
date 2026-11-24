@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { fileManager } from "$lib/platform";
   import { toast } from "svelte-sonner";
   import { app } from "$lib/state.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -55,7 +56,7 @@
           </Button>
         {/snippet}
       </Tooltip.Trigger>
-      <Tooltip.Content>Show in Finder</Tooltip.Content>
+      <Tooltip.Content>Show in {fileManager}</Tooltip.Content>
     </Tooltip.Root>
   {/snippet}
 </ZoomViewer>

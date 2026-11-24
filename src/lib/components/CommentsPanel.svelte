@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { modKey } from "$lib/platform";
   import { tick } from "svelte";
   import { app, type CommentThread } from "$lib/state.svelte";
   import { relativeTime } from "$lib/comments";
@@ -122,7 +123,7 @@
             placeholder="Add a comment…"
             class="w-full resize-none rounded-md bg-background/80 px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground/70"
             onkeydown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || !e.shiftKey)) {
+              if (e.key === "Enter" && (modKey(e) || !e.shiftKey)) {
                 e.preventDefault();
                 submitDraft();
               } else if (e.key === "Escape") {

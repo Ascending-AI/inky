@@ -55,6 +55,11 @@ describe('the download host', () => {
 		expect(feedUrl(base)).toBe('https://downloads.example.com/app/latest.json');
 		const mac = PLATFORMS.find((p) => p.id === 'macos');
 		expect(installerUrl(base, mac!.installers[0])).toBe('https://downloads.example.com/Inky.dmg');
+		const windows = PLATFORMS.find((p) => p.id === 'windows');
+		expect(installerUrl(base, windows!.installers[0])).toBe(
+			'https://downloads.example.com/Inky-setup.exe'
+		);
+		expect(windows!.installers[0].feedKey).toBe('windows-x86_64');
 	});
 });
 
