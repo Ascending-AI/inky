@@ -37,7 +37,7 @@ The `windows` job:
 1. It runs the checks and the tests, the Rust tests included, on Windows.
 2. It builds the NSIS installer (`src-tauri/tauri.windows.conf.json`) with the version, the download host and the update key, and stages it. The installer is not code signed: Windows SmartScreen warns people the first time.
 3. It installs the installer on the runner and runs it: an agent writes, reads and lists a document over MCP, and the app opens it (`scripts/smoke-windows.mjs`).
-4. It drives the installed app through WebDriver: the sidebar, rendering, a picture and a video, shortcuts, tabs, saving, and a document an agent writes while the app is open (`e2e/windows.mjs`).
+4. It drives the installed app over WebView2's DevTools port: the sidebar, rendering, a picture and a video, shortcuts, tabs, saving, and a document an agent writes while the app is open (`e2e/windows.mjs`).
 5. It keeps the staged files for the publish job.
 
 The `publish` job runs only when both builds pass:

@@ -298,7 +298,7 @@ backend is Tauri 2 and Rust; the MCP server is `src-tauri/src/mcp.rs`. Run
 Windows: the same code builds a per-user NSIS installer
 (`src-tauri/tauri.windows.conf.json`). CI's `windows` job (`check.yml`) runs
 the tests on Windows, builds the installer, installs it, and drives the app
-through WebDriver (`scripts/smoke-windows.mjs`, `e2e/windows.mjs`). Each run
+over its DevTools port (`scripts/smoke-windows.mjs`, `e2e/windows.mjs`). Each run
 keeps the installer as the artifact `inky-windows-installer`, to try on a PC.
 
 `make dmg` signs the update files with `~/.tauri/inky.key` (override with
